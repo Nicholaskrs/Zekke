@@ -1,14 +1,11 @@
 package logger
 
 import (
-	"github.com/gin-gonic/gin"
 	"template-go/util/trace"
 	"time"
-)
 
-type LogValues interface {
-	LogValues(log LogDict)
-}
+	"github.com/gin-gonic/gin"
+)
 
 type Logger interface {
 	RouterLogger() gin.HandlerFunc
@@ -56,32 +53,4 @@ type Log interface {
 
 	// Msg prints the log with the given message.
 	Msg(msg string)
-}
-
-type LogDict interface {
-
-	// MarshalJson must marshal the given interface into JSON and logs it as a JSON object complete with fields, not
-	// as string. It's costly, so should only be used in very serious errors.
-	MarshalJson(key string, data interface{}) LogDict
-
-	// ErrorCustomKey will unwrap until 5 levels and try to cast each error to LogValues so more information can be
-	// logged.
-	ErrorCustomKey(key string, err error) LogDict
-
-	// Error logs error with ErrorCustomKey and the default error key.
-	Error(err error) LogDict
-	PanicError(pErr error) LogDict
-
-	Str(key string, str string) LogDict
-	Strs(key string, args ...string) LogDict
-	Bool(key string, val bool) LogDict
-	Int(key string, val int) LogDict
-	Ints(key string, args ...int) LogDict
-	Int64(key string, val int64) LogDict
-	Float64(key string, val float64) LogDict
-	Bytes(key string, val []byte) LogDict
-	Dict(key string, dict LogDict) LogDict
-	Time(key string, t time.Time) LogDict
-	Dur(key string, d time.Duration) LogDict
-	NewDict() LogDict
 }

@@ -48,7 +48,7 @@ func (repo *UserRepository) LockUser(userId uint) (*model.User, error) {
 			Strength: "UPDATE",
 		},
 	).Where("id = ?", userId).First(&user).Error; err != nil {
-		return nil, helpers.Wrap(err, true)
+		return nil, helpers.Wrap(err)
 	}
 	return &user, nil
 }
@@ -57,7 +57,7 @@ func (repo *UserRepository) LockUser(userId uint) (*model.User, error) {
 func (repo *UserRepository) FindUserByUsername(username string) (*model.User, error) {
 	var user model.User
 	if err := repo.transaction.Where("username = ?", username).First(&user).Error; err != nil {
-		return nil, helpers.Wrap(err, true)
+		return nil, helpers.Wrap(err)
 	}
 	return &user, nil
 }
@@ -66,7 +66,7 @@ func (repo *UserRepository) FindUserByUsername(username string) (*model.User, er
 func (repo *UserRepository) FindUserByID(id uint) (*model.User, error) {
 	var user model.User
 	if err := repo.transaction.Where("id = ?", id).First(&user).Error; err != nil {
-		return nil, helpers.Wrap(err, true)
+		return nil, helpers.Wrap(err)
 	}
 	return &user, nil
 }
@@ -75,7 +75,7 @@ func (repo *UserRepository) FindUserByID(id uint) (*model.User, error) {
 func (repo *UserRepository) CheckUserExistsByUsername(username string) (bool, error) {
 	var count int64
 	if err := repo.transaction.Model(&model.User{}).Where("username = ?", username).Count(&count).Error; err != nil {
-		return false, helpers.Wrap(err, true)
+		return false, helpers.Wrap(err)
 	}
 	return count > 0, nil
 }
@@ -83,7 +83,7 @@ func (repo *UserRepository) CheckUserExistsByUsername(username string) (bool, er
 // CreateUser used to insert new row data. It returns inserted ID and error
 func (repo *UserRepository) CreateUser(param *model.User) (uint, error) {
 	if err := repo.transaction.Create(&param).Error; err != nil {
-		return 0, helpers.Wrap(err, true)
+		return 0, helpers.Wrap(err)
 	}
 	return param.ID, nil
 }
@@ -96,7 +96,7 @@ func (repo *UserRepository) UpdateUser(param *model.User) error {
 func (repo *UserRepository) FindUserByExternalID(externalID string) (*model.User, error) {
 	var user model.User
 	if err := repo.transaction.Where("external_id = ?", externalID).First(&user).Error; err != nil {
-		return nil, helpers.Wrap(err, true)
+		return nil, helpers.Wrap(err)
 	}
 	return &user, nil
 }
@@ -117,7 +117,7 @@ func (repo *UserRepository) FilterUser(filterUser FilterUser, page int, limit in
 		Offset(helpers.GetOffset(page, limit)).
 		Limit(limit).
 		Find(&users).Error; err != nil {
-		return nil, helpers.Wrap(err, true)
+		return nil, helpers.Wrap(err)
 	}
 	return users, nil
 }
@@ -136,7 +136,7 @@ func (repo *UserRepository) FilterUserCount(filterUser FilterUser) (int64, error
 	// Find total rows
 	if err := query.Model(model.User{}).
 		Count(&totalRows).Error; err != nil {
-		return 0, helpers.Wrap(err, true)
+		return 0, helpers.Wrap(err)
 	}
 
 	return totalRows, nil
@@ -146,21 +146,21 @@ func (repo *UserRepository) FilterUserCount(filterUser FilterUser) (int64, error
 func (repo *UserRepository) GetAllUser() ([]uint, error) {
 	var userIDs []uint
 	if err := repo.transaction.Model(&model.User{}).Select("id").Find(&userIDs).Error; err != nil {
-		return nil, helpers.Wrap(err, true)
+		return nil, helpers.Wrap(err)
 	}
 	return userIDs, nil
 }
 
 func (repo *UserRepository) CreateFcmToken(param *model.FcmToken) error {
 	if err := repo.transaction.Create(param).Error; err != nil {
-		return helpers.Wrap(err, true)
+		return helpers.Wrap(err)
 	}
 	return nil
 }
 
 func (repo *UserRepository) DeleteFcmTokenBulk(tokens []string) error {
 	if err := repo.transaction.Where("fcm_token IN (?)", tokens).Delete(&model.FcmToken{}).Error; err != nil {
-		return helpers.Wrap(err, true)
+		return helpers.Wrap(err)
 	}
 	return nil
 }
@@ -168,7 +168,7 @@ func (repo *UserRepository) DeleteFcmTokenBulk(tokens []string) error {
 func (repo *UserRepository) GetUserFcmToken(userId uint) ([]*model.FcmToken, error) {
 	var fcmTokens []*model.FcmToken
 	if err := repo.transaction.Where("user_id = ?", userId).Find(&fcmTokens).Error; err != nil {
-		return nil, helpers.Wrap(err, true)
+		return nil, helpers.Wrap(err)
 	}
 	return fcmTokens, nil
 }

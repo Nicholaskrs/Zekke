@@ -205,7 +205,7 @@ func (service *UserServiceImpl) ChangePasswordByExternalID(ctx context.Context, 
 	// Lock user to be updated.
 	sales, err = userRepo.LockUser(sales.ID)
 	if err != nil {
-		service.Logger.Warn(paramIn.Trace).Msg("ChangePasswordByExternalID(): failed to lock user")
+		service.Logger.ErrorErr(paramIn.Trace, err).Msg("ChangePasswordByExternalID(): failed to lock user")
 		resp.ErrorMessage = "failed to lock user"
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
