@@ -3,11 +3,8 @@ package enum
 type Role string
 
 const (
-	National    Role = "National"
-	AreaManager Role = "Area Manager"
-	Distributor Role = "Distributor"
-	Operator    Role = "Operator"
-	Sales       Role = "Sales"
+	Admin  Role = "Admin"
+	Member Role = "Member"
 )
 
 func (s Role) String() string {
@@ -15,9 +12,6 @@ func (s Role) String() string {
 }
 
 var SliceRole = []string{
-	National.String(),
-	AreaManager.String(),
-	Distributor.String(),
-	Operator.String(),
-	Sales.String(),
+	Admin.String(),
+	Member.String(),
 }

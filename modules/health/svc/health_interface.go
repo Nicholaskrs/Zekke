@@ -2,7 +2,7 @@ package svc
 
 import (
 	"template-go/data/model"
-	"template-go/util/trace"
+	"template-go/util/logtrace"
 )
 
 type HealthCheckService interface {
@@ -10,7 +10,7 @@ type HealthCheckService interface {
 }
 
 type TestHealthIn struct {
-	Trace *trace.Trace
+	Trace *logtrace.LogTrace
 }
 
 type TestHealthOut struct {

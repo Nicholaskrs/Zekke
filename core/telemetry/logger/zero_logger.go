@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"template-go/util/trace"
+	"net/http"
+	"template-go/util/logtrace"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -14,9 +15,10 @@ import (
 )
 
 const (
-	errKey     = "_err"
-	traceIdKey = "_traceid"
-	loggerKey  = "_logger"
+	errKey      = "_err"
+	traceIdKey  = "_traceid"
+	traceReqKey = "_req"
+	loggerKey   = "_logger"
 )
 
 var _ Logger = (*ZerologLogger)(nil)
@@ -31,7 +33,7 @@ type ZerologLogger struct {
 	log *zerolog.Logger
 }
 
-func (*ZerologLogger) RouterLogger() gin.HandlerFunc {
+func (z *ZerologLogger) RouterLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
@@ -51,68 +53,95 @@ func (*ZerologLogger) RouterLogger() gin.HandlerFunc {
 			path = path + "?" + raw
 		}
 
-		log.Printf("http: %s %s (%3d) [%v]",
+		msg := fmt.Sprintf("http: %s %s (%3d) [%v]",
 			method,
 			path,
 			statusCode,
 			latency,
 		)
+
+		var l Log
+		tr := logtrace.GetLogTrace(c)
+
+		switch {
+		case c.Writer.Status() == http.StatusUnauthorized || c.Writer.Status() == http.StatusForbidden:
+			l = z.Warn(tr)
+		case c.Writer.Status() >= http.StatusBadRequest && c.Writer.Status() < http.StatusInternalServerError:
+			tr.ShouldLogRequest.Store(true)
+			l = z.Warn(tr)
+		case c.Writer.Status() >= http.StatusInternalServerError:
+			tr.ShouldLogRequest.Store(true)
+			l = z.Error(tr)
+		default:
+			l = z.Info(tr)
+		}
+
+		l.Detail(tr).
+			Int("http_status", statusCode).
+			Str("http_method", method).
+			Str("http_path", path).
+			Int64("http_latency", latency.Milliseconds()).
+			Str("http_user_agent", c.Request.UserAgent()).
+			Str("http_url", c.Request.URL.String()).
+			Str("http_protocol", c.Request.Proto).
+			Msg(msg)
+
 	}
 }
 
-func (z *ZerologLogger) Panic(trace *trace.Trace) Log {
+func (z *ZerologLogger) Panic(trace *logtrace.LogTrace) Log {
 	return z.PanicNoTrace().Str(traceIdKey, trace.TraceId)
 }
 
-func (z *ZerologLogger) Fatal(trace *trace.Trace) Log {
+func (z *ZerologLogger) Fatal(trace *logtrace.LogTrace) Log {
 	return z.FatalNoTrace().Str(traceIdKey, trace.TraceId)
 }
 
-func (z *ZerologLogger) Error(trace *trace.Trace) Log {
+func (z *ZerologLogger) Error(trace *logtrace.LogTrace) Log {
 	return z.ErrorNoTrace().Str(traceIdKey, trace.TraceId)
 }
 
-func (z *ZerologLogger) Warn(trace *trace.Trace) Log {
+func (z *ZerologLogger) Warn(trace *logtrace.LogTrace) Log {
 	return z.WarnNoTrace().Str(traceIdKey, trace.TraceId)
 }
 
-func (z *ZerologLogger) Info(trace *trace.Trace) Log {
+func (z *ZerologLogger) Info(trace *logtrace.LogTrace) Log {
 	return z.InfoNoTrace().Str(traceIdKey, trace.TraceId)
 }
 
-func (z *ZerologLogger) Debug(trace *trace.Trace) Log {
+func (z *ZerologLogger) Debug(trace *logtrace.LogTrace) Log {
 	return z.DebugNoTrace().Str(traceIdKey, trace.TraceId)
 }
 
-func (z *ZerologLogger) Trace(trace *trace.Trace) Log {
+func (z *ZerologLogger) Trace(trace *logtrace.LogTrace) Log {
 	return z.TraceNoTrace().Str(traceIdKey, trace.TraceId)
 }
 
-func (z *ZerologLogger) PanicErr(trace *trace.Trace, err error) Log {
+func (z *ZerologLogger) PanicErr(trace *logtrace.LogTrace, err error) Log {
 	return z.Panic(trace).Error(err)
 }
 
-func (z *ZerologLogger) FatalErr(trace *trace.Trace, err error) Log {
+func (z *ZerologLogger) FatalErr(trace *logtrace.LogTrace, err error) Log {
 	return z.Fatal(trace).Error(err)
 }
 
-func (z *ZerologLogger) ErrorErr(trace *trace.Trace, err error) Log {
+func (z *ZerologLogger) ErrorErr(trace *logtrace.LogTrace, err error) Log {
 	return z.Error(trace).Error(err)
 }
 
-func (z *ZerologLogger) WarnErr(trace *trace.Trace, err error) Log {
+func (z *ZerologLogger) WarnErr(trace *logtrace.LogTrace, err error) Log {
 	return z.Warn(trace).Error(err)
 }
 
-func (z *ZerologLogger) InfoErr(trace *trace.Trace, err error) Log {
+func (z *ZerologLogger) InfoErr(trace *logtrace.LogTrace, err error) Log {
 	return z.Info(trace).Error(err)
 }
 
-func (z *ZerologLogger) DebugErr(trace *trace.Trace, err error) Log {
+func (z *ZerologLogger) DebugErr(trace *logtrace.LogTrace, err error) Log {
 	return z.Debug(trace).Error(err)
 }
 
-func (z *ZerologLogger) TraceErr(trace *trace.Trace, err error) Log {
+func (z *ZerologLogger) TraceErr(trace *logtrace.LogTrace, err error) Log {
 	return z.Trace(trace).Error(err)
 }
 
@@ -261,5 +290,12 @@ func (z *ZerologLog) Time(key string, t time.Time) Log {
 
 func (z *ZerologLog) Dur(key string, d time.Duration) Log {
 	z.log.Dur(key, d)
+	return z
+}
+
+func (z *ZerologLog) Detail(trace *logtrace.LogTrace) Log {
+	if trace.ShouldLogRequest.Load() {
+		z.MarshalJson(traceReqKey, trace.Request)
+	}
 	return z
 }

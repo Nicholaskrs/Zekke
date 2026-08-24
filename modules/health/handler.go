@@ -5,11 +5,10 @@ import (
 	"template-go/api"
 	"template-go/base/constants"
 	"template-go/modules/health/svc"
-	"template-go/util/trace"
+	"template-go/util/logtrace"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
-	"github.com/google/uuid"
 )
 
 type HealthCheckHandler struct {
@@ -27,10 +26,7 @@ func NewHealthCheckHandler(
 // TestHealth used to check service by return success.
 func (handler *HealthCheckHandler) TestHealth(c *gin.Context) {
 	response := &api.HealthCheckResp{}
-	trace := &trace.Trace{
-		TraceId: uuid.New().String(),
-	}
-
+	trace := logtrace.GetLogTrace(c)
 	request := api.HealthCheckReq{}
 	if err := c.ShouldBind(&request); err != nil {
 		ve, ok := err.(validator.ValidationErrors)

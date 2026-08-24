@@ -2,21 +2,22 @@ package storage
 
 import (
 	"context"
+	"io"
+	"path"
+	"strings"
+	logger2 "template-go/core/telemetry/logger"
+	"template-go/util/logtrace"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
-	"io"
-	"path"
-	"strings"
-	"template-go/util/logger"
-	"template-go/util/trace"
 )
 
 var _ Storage = (*AwsStorage)(nil)
 
 type AwsStorage struct {
-	logger   logger.Logger
+	logger   logger2.Logger
 	bucket   string
 	basePath string
 	baseUrl  string
@@ -39,7 +40,7 @@ func NewAwsStorage(region string, bucket string, basePath string, baseUrl string
 	client := s3.NewFromConfig(cfg)
 
 	return &AwsStorage{
-		logger:   logger.NewZerologLogger("AwsStorage"),
+		logger:   logger2.NewZerologLogger("AwsStorage"),
 		bucket:   bucket,
 		basePath: basePath,
 		baseUrl:  baseUrl,
@@ -49,7 +50,7 @@ func NewAwsStorage(region string, bucket string, basePath string, baseUrl string
 
 func (s *AwsStorage) UploadAsRandom(
 	ctx context.Context,
-	trace *trace.Trace,
+	trace *logtrace.LogTrace,
 	src io.Reader,
 	filePath string,
 	ext string,
@@ -65,7 +66,7 @@ func (s *AwsStorage) UploadAsRandom(
 
 func (s *AwsStorage) Upload(
 	ctx context.Context,
-	trace *trace.Trace,
+	trace *logtrace.LogTrace,
 	src io.Reader,
 	fileName string,
 	filePath string,

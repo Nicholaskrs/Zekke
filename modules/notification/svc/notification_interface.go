@@ -3,7 +3,7 @@ package svc
 import (
 	"context"
 	"template-go/data/model"
-	"template-go/util/trace"
+	"template-go/util/logtrace"
 )
 
 type NotificationService interface {
@@ -11,7 +11,7 @@ type NotificationService interface {
 }
 
 type SendPushNotificationIn struct {
-	Trace  *trace.Trace
+	Trace  *logtrace.LogTrace
 	UserID uint
 	Title  string
 	Body   string

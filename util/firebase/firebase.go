@@ -2,17 +2,18 @@ package firebase
 
 import (
 	"context"
+	"log"
+	logger2 "template-go/core/telemetry/logger"
+	"template-go/util/logtrace"
+
 	firebase "firebase.google.com/go"
 	"firebase.google.com/go/messaging"
 	"google.golang.org/api/option"
-	"log"
-	"template-go/util/logger"
-	"template-go/util/trace"
 )
 
 func NewFirebaseClient(serviceAccountKeyPath string) *Client {
-	zerologLogger := logger.NewZerologLogger("FirebaseClient")
-	trc := &trace.Trace{TraceId: "FirebaseClient"}
+	zerologLogger := logger2.NewZerologLogger("FirebaseClient")
+	trc := &logtrace.LogTrace{TraceId: "FirebaseClient"}
 	opt := option.WithCredentialsFile(serviceAccountKeyPath)
 	app, err := firebase.NewApp(context.Background(), nil, opt)
 	if err != nil {
@@ -32,7 +33,7 @@ func NewFirebaseClient(serviceAccountKeyPath string) *Client {
 
 type Client struct {
 	client *messaging.Client
-	logger logger.Logger
+	logger logger2.Logger
 }
 
 func (n *Client) Send(ctx context.Context, title string, body string, data map[string]string, token string) (string, error) {

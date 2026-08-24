@@ -4,7 +4,7 @@ import (
 	"context"
 	dto "template-go/base/base"
 	"template-go/data/model"
-	"template-go/util/trace"
+	"template-go/util/logtrace"
 
 	"github.com/golang-jwt/jwt"
 )
@@ -17,10 +17,6 @@ type UserService interface {
 	// Register used to register new user. Note that register is for internal usage only.
 	Register(ctx context.Context, paramIn *UserRegisterIn) *UserRegisterOut
 
-	// ChangePasswordByExternalID used to change sales password.
-	// Note that only the area manager who oversees the sales has permission to change their password.
-	ChangePasswordByExternalID(ctx context.Context, paramIn *ChangePasswordIn) *ChangePasswordOut
-
 	// GetUser will return user based on ID it'll return success false if user not exists.
 	GetUser(ctx context.Context, request *GetUserIn) *GetUserOut
 
@@ -32,7 +28,7 @@ type UserService interface {
 }
 
 type LoginUserIn struct {
-	Trace    *trace.Trace
+	Trace    *logtrace.LogTrace
 	Username string
 	Password string
 }
@@ -55,14 +51,12 @@ type AuthCustomClaims struct {
 }
 
 type UserRegisterIn struct {
-	Trace         *trace.Trace
-	Username      string
-	Email         string
-	Password      string
-	FullName      string
-	UserRole      string
-	DistributorID uint
-	AreaID        uint
+	Trace    *logtrace.LogTrace
+	Username string
+	Email    string
+	Password string
+	FullName string
+	UserRole string
 }
 
 type UserRegisterOut struct {
@@ -70,7 +64,7 @@ type UserRegisterOut struct {
 }
 
 type ChangePasswordIn struct {
-	Trace      *trace.Trace
+	Trace      *logtrace.LogTrace
 	ExternalID string
 	Password   string
 	UserID     uint
@@ -81,12 +75,12 @@ type ChangePasswordOut struct {
 }
 
 type GetUserIn struct {
-	Trace  *trace.Trace
+	Trace  *logtrace.LogTrace
 	UserID uint
 }
 
 type GetListUsersByRoleIn struct {
-	Trace  *trace.Trace
+	Trace  *logtrace.LogTrace
 	UserID uint
 }
 type GetListuserByRoleOut struct {
@@ -100,7 +94,7 @@ type GetUserOut struct {
 }
 
 type GetDistributorIDByUserIDIn struct {
-	Trace  *trace.Trace
+	Trace  *logtrace.LogTrace
 	UserID uint
 }
 
@@ -110,7 +104,7 @@ type GetDistributorIDByUserIDOut struct {
 }
 
 type GetSalesUserIn struct {
-	Trace  *trace.Trace
+	Trace  *logtrace.LogTrace
 	UserID uint
 }
 
@@ -120,7 +114,7 @@ type GetSalesUserOut struct {
 }
 
 type GetSalesUsersByAreaIDIn struct {
-	Trace  *trace.Trace
+	Trace  *logtrace.LogTrace
 	AreaID uint
 }
 
@@ -130,7 +124,7 @@ type GetSalesUsersByAreaIDOut struct {
 }
 
 type GetUsersByDistributorIDIn struct {
-	Trace         *trace.Trace
+	Trace         *logtrace.LogTrace
 	DistributorID uint
 }
 
@@ -140,7 +134,7 @@ type GetUsersByDistributorIDOut struct {
 }
 
 type InsertFcmTokenIn struct {
-	Trace  *trace.Trace
+	Trace  *logtrace.LogTrace
 	UserID uint
 	Token  string
 }
@@ -150,7 +144,7 @@ type InsertFcmTokenOut struct {
 }
 
 type DeleteFcmTokenBulkIn struct {
-	Trace  *trace.Trace
+	Trace  *logtrace.LogTrace
 	Tokens []string
 }
 
@@ -159,7 +153,7 @@ type DeleteFcmTokenBulkOut struct {
 }
 
 type GetUserFcmTokenIn struct {
-	Trace  *trace.Trace
+	Trace  *logtrace.LogTrace
 	UserID uint
 }
 
