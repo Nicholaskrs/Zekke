@@ -12,7 +12,7 @@ type AuditLog struct {
 	Diff          string    `gorm:"column:diff;type:text"`
 	UserID        uint      `gorm:"column:user_id;type:int"`
 	ServiceCaller string    `gorm:"column:service_caller;type:varchar(255)"`
-	CreatedTs     time.Time `gorm:"column:created_ts;type:datetime"`
+	CreatedTs     time.Time `gorm:"column:created_ts;type:timestamp"`
 }
 
 func (AuditLog) TableName() string {

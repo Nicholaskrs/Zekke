@@ -5,11 +5,11 @@ import (
 	"errors"
 	"net/http"
 	"template-go/base/helpers"
+	logger2 "template-go/core/telemetry/logger"
 	"template-go/data/enum"
 	"template-go/data/model"
 	user "template-go/modules/user/repository"
 	"template-go/util/config"
-	"template-go/util/logger"
 	"time"
 
 	"gorm.io/gorm"
@@ -21,7 +21,7 @@ import (
 type UserServiceImpl struct {
 	UserStorage user.UserStorage
 	Config      config.Config
-	Logger      logger.Logger
+	Logger      logger2.Logger
 }
 
 func NewUserService(
@@ -32,14 +32,14 @@ func NewUserService(
 	return &UserServiceImpl{
 		UserStorage: UserStorage,
 		Config:      Config,
-		Logger:      logger.NewZerologLogger("UserService"),
+		Logger:      logger2.NewZerologLogger("UserService"),
 	}
 }
 
 func (service *UserServiceImpl) LoginUser(ctx context.Context, paramIn *LoginUserIn) *LoginUserOut {
 	resp := &LoginUserOut{}
 	userRepo := service.UserStorage.BeginTx(ctx)
-	defer userRepo.Rollback()
+	defer userRepo.Rollback(ctx)
 
 	// Find user based on its username
 	user, err := userRepo.FindUserByUsername(paramIn.Username)
@@ -104,7 +104,7 @@ func (service *UserServiceImpl) generateToken(id uint, email string, name string
 func (service *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegisterIn) *UserRegisterOut {
 	resp := &UserRegisterOut{}
 	userRepo := service.UserStorage.BeginTx(ctx)
-	defer userRepo.Rollback()
+	defer userRepo.Rollback(ctx)
 
 	// Validate role
 	if !helpers.InArray(enum.SliceRole, paramIn.UserRole) {
@@ -148,8 +148,6 @@ func (service *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegis
 	user.Password = encryptPassword
 	user.FullName = paramIn.FullName
 	user.Role = enum.Role(paramIn.UserRole)
-	user.DistributorID = paramIn.DistributorID
-	user.AreaID = paramIn.AreaID
 	user.Timestamp = &model.Timestamp{
 		CreatedTs:     now,
 		LastUpdatedTs: now,
@@ -165,84 +163,9 @@ func (service *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegis
 
 	// TODO: Add audit log.
 
-	err = userRepo.Commit()
+	err = userRepo.Commit(ctx)
 	if err != nil {
 		service.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): commit failed")
-		resp.ErrorMessage = err.Error()
-		resp.ErrorCode = http.StatusInternalServerError
-		return resp
-	}
-
-	resp.Success = true
-	return resp
-}
-
-func (service *UserServiceImpl) ChangePasswordByExternalID(ctx context.Context, paramIn *ChangePasswordIn) *ChangePasswordOut {
-	resp := &ChangePasswordOut{}
-
-	userRepo := service.UserStorage.BeginTx(ctx)
-	defer userRepo.Rollback()
-
-	// Fetch current user.
-	currentUser, err := userRepo.FindUserByID(paramIn.UserID)
-	if err != nil {
-		// Panic because it's mean there's might be leak in JWTToken key.
-		service.Logger.PanicErr(paramIn.Trace, err).Msg("ChangePasswordByExternalID(): current user not found")
-		resp.ErrorMessage = "user not found"
-		resp.ErrorCode = http.StatusForbidden
-		return resp
-	}
-
-	// Fetch user sales based on externalID.
-	sales, err := userRepo.FindUserByExternalID(paramIn.ExternalID)
-	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("ChangePasswordByExternalID(): sales not found")
-		resp.ErrorMessage = "sales not found"
-		resp.ErrorCode = http.StatusNotFound
-		return resp
-	}
-
-	// Lock user to be updated.
-	sales, err = userRepo.LockUser(sales.ID)
-	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("ChangePasswordByExternalID(): failed to lock user")
-		resp.ErrorMessage = "failed to lock user"
-		resp.ErrorCode = http.StatusInternalServerError
-		return resp
-	}
-
-	// Validate access.
-	if sales.Role != enum.Sales || sales.AreaID != currentUser.AreaID {
-		service.Logger.Warn(paramIn.Trace).Msg("ChangePasswordByExternalID(): current user has no access")
-		resp.ErrorMessage = "current user has no access"
-		resp.ErrorCode = http.StatusForbidden
-		return resp
-	}
-
-	// Encrypt the password.
-	encryptPassword, err := helpers.Encrypt(service.Config.AuthSecret, paramIn.Password)
-	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("ChangePasswordByExternalID(): encrypt password failed")
-		resp.ErrorMessage = err.Error()
-		resp.ErrorCode = http.StatusInternalServerError
-		return resp
-	}
-	sales.Password = encryptPassword
-
-	// UpdateUser sales password.
-	err = userRepo.UpdateUser(sales)
-	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("ChangePasswordByExternalID(): failed to update sales's data")
-		resp.ErrorMessage = err.Error()
-		resp.ErrorCode = http.StatusInternalServerError
-		return resp
-	}
-
-	// TODO: Add audit log.
-
-	err = userRepo.Commit()
-	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("ChangePasswordByExternalID(): commit failed")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
@@ -255,7 +178,7 @@ func (service *UserServiceImpl) ChangePasswordByExternalID(ctx context.Context, 
 func (service *UserServiceImpl) GetUser(ctx context.Context, paramIn *GetUserIn) *GetUserOut {
 	resp := &GetUserOut{}
 	userRepo := service.UserStorage.BeginTx(ctx)
-	defer userRepo.Rollback()
+	defer userRepo.Rollback(ctx)
 
 	user, err := userRepo.FindUserByID(paramIn.UserID)
 
@@ -282,7 +205,7 @@ func (service *UserServiceImpl) GetUser(ctx context.Context, paramIn *GetUserIn)
 func (service *UserServiceImpl) InsertFcmToken(ctx context.Context, paramIn *InsertFcmTokenIn) *InsertFcmTokenOut {
 	resp := &InsertFcmTokenOut{}
 	userRepo := service.UserStorage.BeginTx(ctx)
-	defer userRepo.Rollback()
+	defer userRepo.Rollback(ctx)
 
 	// Check if user already exists based on its username. If yes, return error indicating that the username cannot be duplicated.
 	usr, err := userRepo.FindUserByID(paramIn.UserID)
@@ -326,7 +249,7 @@ func (service *UserServiceImpl) InsertFcmToken(ctx context.Context, paramIn *Ins
 		return resp
 	}
 
-	err = userRepo.Commit()
+	err = userRepo.Commit(ctx)
 	if err != nil {
 		service.Logger.ErrorErr(paramIn.Trace, err).Msg("CreateFcmToken(): commit failed")
 		resp.ErrorMessage = err.Error()
@@ -341,7 +264,7 @@ func (service *UserServiceImpl) InsertFcmToken(ctx context.Context, paramIn *Ins
 func (service *UserServiceImpl) DeleteFcmTokenBulk(ctx context.Context, paramIn *DeleteFcmTokenBulkIn) *DeleteFcmTokenBulkOut {
 	resp := &DeleteFcmTokenBulkOut{}
 	userRepo := service.UserStorage.BeginTx(ctx)
-	defer userRepo.Rollback()
+	defer userRepo.Rollback(ctx)
 
 	err := userRepo.DeleteFcmTokenBulk(paramIn.Tokens)
 	if err != nil {
@@ -351,7 +274,7 @@ func (service *UserServiceImpl) DeleteFcmTokenBulk(ctx context.Context, paramIn 
 		return resp
 	}
 
-	err = userRepo.Commit()
+	err = userRepo.Commit(ctx)
 	if err != nil {
 		service.Logger.ErrorErr(paramIn.Trace, err).Msg("DeleteFcmTokenBulk(): commit failed")
 		resp.ErrorMessage = err.Error()
@@ -366,7 +289,7 @@ func (service *UserServiceImpl) DeleteFcmTokenBulk(ctx context.Context, paramIn 
 func (service *UserServiceImpl) GetUserFcmToken(ctx context.Context, paramIn *GetUserFcmTokenIn) *GetUserFcmTokenOut {
 	resp := &GetUserFcmTokenOut{}
 	userRepo := service.UserStorage.BeginTx(ctx)
-	defer userRepo.Rollback()
+	defer userRepo.Rollback(ctx)
 
 	// Check if user already exists based on its username. If yes, return error indicating that the username cannot be duplicated.
 	isUserExists, err := userRepo.FindUserByID(paramIn.UserID)

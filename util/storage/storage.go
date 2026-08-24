@@ -3,13 +3,13 @@ package storage
 import (
 	"context"
 	"io"
-	"template-go/util/trace"
+	"template-go/util/logtrace"
 )
 
 type Storage interface {
 	UploadAsRandom(
 		ctx context.Context,
-		trace *trace.Trace,
+		trace *logtrace.LogTrace,
 		src io.Reader,
 		filePath string,
 		ext string,
@@ -22,7 +22,7 @@ type Storage interface {
 
 	Upload(
 		ctx context.Context,
-		trace *trace.Trace,
+		trace *logtrace.LogTrace,
 		src io.Reader,
 		fileName string,
 		filePath string,

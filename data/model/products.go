@@ -9,7 +9,7 @@ type Product struct {
 	CreatedByID   uint       `gorm:"column:created_by_id;type:int"`
 	LastUpdatedBy uint       `gorm:"column:last_updated_by;type:int"`
 	DeletedBy     *uint      `gorm:"column:deleted_by;type:int"`
-	DeletedTs     *time.Time `gorm:"column:deleted_ts;type:datetime"`
+	DeletedTs     *time.Time `gorm:"column:deleted_ts;type:timestamp"`
 }
 
 func (Product) TableName() string {

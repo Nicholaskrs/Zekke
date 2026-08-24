@@ -1,7 +1,7 @@
 package logger
 
 import (
-	"template-go/util/trace"
+	"template-go/util/logtrace"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,21 +18,21 @@ type Logger interface {
 	DebugNoTrace() Log
 	TraceNoTrace() Log
 
-	Panic(trace *trace.Trace) Log
-	Fatal(trace *trace.Trace) Log
-	Error(trace *trace.Trace) Log
-	Warn(trace *trace.Trace) Log
-	Info(trace *trace.Trace) Log
-	Debug(trace *trace.Trace) Log
-	Trace(trace *trace.Trace) Log
+	Panic(trace *logtrace.LogTrace) Log
+	Fatal(trace *logtrace.LogTrace) Log
+	Error(trace *logtrace.LogTrace) Log
+	Warn(trace *logtrace.LogTrace) Log
+	Info(trace *logtrace.LogTrace) Log
+	Debug(trace *logtrace.LogTrace) Log
+	Trace(trace *logtrace.LogTrace) Log
 
-	PanicErr(trace *trace.Trace, err error) Log
-	FatalErr(trace *trace.Trace, err error) Log
-	ErrorErr(trace *trace.Trace, err error) Log
-	WarnErr(trace *trace.Trace, err error) Log
-	InfoErr(trace *trace.Trace, err error) Log
-	DebugErr(trace *trace.Trace, err error) Log
-	TraceErr(trace *trace.Trace, err error) Log
+	PanicErr(trace *logtrace.LogTrace, err error) Log
+	FatalErr(trace *logtrace.LogTrace, err error) Log
+	ErrorErr(trace *logtrace.LogTrace, err error) Log
+	WarnErr(trace *logtrace.LogTrace, err error) Log
+	InfoErr(trace *logtrace.LogTrace, err error) Log
+	DebugErr(trace *logtrace.LogTrace, err error) Log
+	TraceErr(trace *logtrace.LogTrace, err error) Log
 }
 
 type Log interface {
@@ -50,6 +50,7 @@ type Log interface {
 	Bytes(key string, val []byte) Log
 	Time(key string, t time.Time) Log
 	Dur(key string, d time.Duration) Log
+	Detail(trace *logtrace.LogTrace) Log
 
 	// Msg prints the log with the given message.
 	Msg(msg string)

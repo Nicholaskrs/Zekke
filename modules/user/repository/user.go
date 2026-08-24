@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"template-go/base/helpers"
+	"template-go/core/telemetry/trace"
 	"template-go/data/model"
 
 	"gorm.io/gorm/clause"
@@ -24,11 +25,15 @@ type UserRepository struct {
 }
 
 func (u *UserStorage) BeginTx(ctx context.Context) *UserRepository {
+	ctx, span := trace.Tracer("Zekke").Start(ctx, "UserBeginTx")
+	defer span.End()
 	return &UserRepository{transaction: u.db.WithContext(ctx).Begin()}
 }
 
 // Commit is used to commit database changes.
-func (repo *UserRepository) Commit() error {
+func (repo *UserRepository) Commit(ctx context.Context) error {
+	ctx, span := trace.Tracer("Zekke").Start(ctx, "UserCommitTx")
+	defer span.End()
 	transaction := repo.transaction.Commit()
 	if transaction.Error != nil {
 		return transaction.Error
@@ -37,7 +42,9 @@ func (repo *UserRepository) Commit() error {
 }
 
 // Rollback is used to rollback database changes.
-func (repo *UserRepository) Rollback() {
+func (repo *UserRepository) Rollback(ctx context.Context) {
+	ctx, span := trace.Tracer("Zekke").Start(ctx, "UserRollbackTx")
+	defer span.End()
 	repo.transaction.Rollback()
 }
 

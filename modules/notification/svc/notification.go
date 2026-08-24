@@ -2,17 +2,18 @@ package svc
 
 import (
 	"context"
-	"firebase.google.com/go/v4/messaging"
 	"net/http"
+	logger2 "template-go/core/telemetry/logger"
 	userSvc "template-go/modules/user/svc"
 	"template-go/util/firebase"
-	"template-go/util/logger"
+
+	"firebase.google.com/go/v4/messaging"
 )
 
 type NotificationServiceImpl struct {
 	firebaseClient *firebase.Client
 	userService    userSvc.UserService
-	logger         logger.Logger
+	logger         logger2.Logger
 }
 
 func NewNotificationService(
@@ -22,7 +23,7 @@ func NewNotificationService(
 	return &NotificationServiceImpl{
 		firebaseClient: firebaseClient,
 		userService:    userService,
-		logger:         logger.NewZerologLogger("NotificationService"),
+		logger:         logger2.NewZerologLogger("NotificationService"),
 	}
 }
 

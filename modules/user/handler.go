@@ -5,13 +5,11 @@ import (
 	"net/http"
 	"template-go/api"
 	"template-go/base/constants"
-	"template-go/data/enum"
 	userSvc "template-go/modules/user/svc"
-	"template-go/util/trace"
+	"template-go/util/logtrace"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
-	"github.com/google/uuid"
 )
 
 type UserHandler struct {
@@ -29,9 +27,7 @@ func NewUserHandler(
 // Login used to authorize user
 func (handler *UserHandler) Login(c *gin.Context) {
 	response := &api.ApiAuthResp{}
-	trace := &trace.Trace{
-		TraceId: uuid.New().String(),
-	}
+	trace := logtrace.GetLogTrace(c)
 	request := api.ApiAuthReq{}
 	if err := c.ShouldBind(&request); err != nil {
 		ve, ok := err.(validator.ValidationErrors)
@@ -71,10 +67,7 @@ func (handler *UserHandler) Login(c *gin.Context) {
 // Register used to register new user
 func (handler *UserHandler) Register(c *gin.Context) {
 	response := &api.UserRegisterResp{}
-
-	trace := &trace.Trace{
-		TraceId: uuid.New().String(),
-	}
+	trace := logtrace.GetLogTrace(c)
 
 	request := api.UserRegisterReq{}
 	if err := c.ShouldBind(&request); err != nil {
@@ -91,20 +84,18 @@ func (handler *UserHandler) Register(c *gin.Context) {
 	sanitizedRequest.Password = ""
 	trace.Request = sanitizedRequest
 
-	ctx, cancel := context.WithTimeout(c, constants.TransactionTimeOut)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), constants.TransactionTimeOut)
 	defer cancel()
 
 	// Call service
 	authOut := handler.UserService.Register(ctx,
 		&userSvc.UserRegisterIn{
-			Trace:         trace,
-			Username:      request.Username,
-			Email:         request.Email,
-			Password:      request.Password,
-			FullName:      request.FullName,
-			UserRole:      request.UserRole,
-			DistributorID: request.DistributorID,
-			AreaID:        request.AreaID,
+			Trace:    trace,
+			Username: request.Username,
+			Email:    request.Email,
+			Password: request.Password,
+			FullName: request.FullName,
+			UserRole: request.UserRole,
 		},
 	)
 	if !authOut.BaseOut.Success {
@@ -116,70 +107,10 @@ func (handler *UserHandler) Register(c *gin.Context) {
 	api.ReturnResponse(c, "register", constants.MethodNull, response, "", http.StatusOK, trace.TraceId)
 }
 
-// ChangePasswordByExternalID used to change sales password. Note that only the area manager who oversees the sales has permission to change their password.
-func (handler *UserHandler) ChangePasswordByExternalID(c *gin.Context) {
-	trace := &trace.Trace{
-		TraceId: uuid.New().String(),
-	}
-
-	ctx, cancel := context.WithTimeout(c, constants.TransactionTimeOut)
-	defer cancel()
-
-	request := api.ChangePasswordReq{}
-	if err := c.ShouldBind(&request); err != nil {
-		ve, ok := err.(validator.ValidationErrors)
-		if !ok {
-			api.ReturnInternalServerError(c, "change password", constants.MethodUpdate, request, err, trace.TraceId)
-			return
-		}
-		api.ReturnValidationError(c, "change password", constants.MethodUpdate, &request, ve, trace.TraceId)
-		return
-	}
-
-	// Get current user login role and id
-	userID := c.GetInt("ID")
-	userRole := c.GetString("role")
-
-	if enum.Role(userRole) != enum.AreaManager {
-		api.ReturnResponse(
-			c,
-			"change password",
-			constants.MethodUpdate,
-			&request,
-			"forbidden access",
-			http.StatusForbidden,
-			trace.TraceId,
-		)
-		return
-	}
-
-	// Call service
-	serviceOut := handler.UserService.ChangePasswordByExternalID(ctx,
-		&userSvc.ChangePasswordIn{
-			Trace:      trace,
-			ExternalID: request.ExternalID,
-			Password:   request.Password,
-			UserID:     uint(userID),
-		},
-	)
-
-	if !serviceOut.BaseOut.Success {
-		api.ReturnResponse(c, "change password", constants.MethodUpdate, nil, serviceOut.BaseOut.ErrorMessage, serviceOut.BaseOut.ErrorCode, trace.TraceId)
-		return
-	}
-
-	// Send response
-	api.ReturnResponse(c, "change password", constants.MethodUpdate, nil, "", http.StatusOK, trace.TraceId)
-
-}
-
 // GetUserProfile used to get user profile based on current logged user.
 func (handler *UserHandler) GetUserProfile(c *gin.Context) {
 	response := &api.GetUserProfileResp{}
-
-	trace := &trace.Trace{
-		TraceId: uuid.New().String(),
-	}
+	trace := logtrace.GetLogTrace(c)
 
 	ctx, cancel := context.WithTimeout(c, constants.TransactionTimeOut)
 	defer cancel()
@@ -210,9 +141,7 @@ func (handler *UserHandler) GetUserProfile(c *gin.Context) {
 // InsertFcmToken used to insert user's fcm token for firebase purpose.
 func (handler *UserHandler) InsertFcmToken(c *gin.Context) {
 	response := &api.InsertFcmTokenResp{}
-	trace := &trace.Trace{
-		TraceId: uuid.New().String(),
-	}
+	trace := logtrace.GetLogTrace(c)
 	request := api.InsertFcmTokenReq{}
 	if err := c.ShouldBind(&request); err != nil {
 		ve, ok := err.(validator.ValidationErrors)
@@ -246,9 +175,7 @@ func (handler *UserHandler) InsertFcmToken(c *gin.Context) {
 // DeleteFcmToken used to insert user's fcm token for firebase purpose.
 func (handler *UserHandler) DeleteFcmToken(c *gin.Context) {
 	response := &api.DeleteFcmTokenResp{}
-	trace := &trace.Trace{
-		TraceId: uuid.New().String(),
-	}
+	trace := logtrace.GetLogTrace(c)
 	request := api.DeleteFcmTokenReq{}
 	if err := c.ShouldBind(&request); err != nil {
 		ve, ok := err.(validator.ValidationErrors)

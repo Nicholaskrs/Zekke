@@ -30,7 +30,6 @@ func SetRouterAuthenticated(masterGroup *gin.RouterGroup, userService userSvc.Us
 	handler := NewUserHandler(userService)
 	group := masterGroup.Group("/user")
 	{
-		group.POST("/change-password", handler.ChangePasswordByExternalID)
 		group.GET("/sales/profile", handler.GetUserProfile)
 		group.POST("/fcm-token/insert", handler.InsertFcmToken)
 		group.POST("/fcm-token/delete", handler.DeleteFcmToken)
