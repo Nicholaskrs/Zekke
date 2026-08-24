@@ -38,8 +38,7 @@ func NewUserService(
 
 func (service *UserServiceImpl) LoginUser(ctx context.Context, paramIn *LoginUserIn) *LoginUserOut {
 	resp := &LoginUserOut{}
-	userRepo := service.UserStorage.BeginTx(ctx)
-	defer userRepo.Rollback(ctx)
+	userRepo := service.UserStorage.NewUserRepositoryRead(ctx)
 
 	// Find user based on its username
 	user, err := userRepo.FindUserByUsername(paramIn.Username)
@@ -51,12 +50,8 @@ func (service *UserServiceImpl) LoginUser(ctx context.Context, paramIn *LoginUse
 	}
 
 	// Validate password
-	decryptPassword, err := helpers.Decrypt(service.Config.AuthSecret, user.Password)
-	if err != nil || decryptPassword != paramIn.Password {
-		// If possible we don't want to throw invalid server error to user.
-		if err != nil {
-			service.Logger.ErrorErr(paramIn.Trace, err).Msg("LoginUser(): error when decrypting")
-		}
+	isVerified := helpers.VerifyPassword(paramIn.Password, user.Password)
+	if !isVerified {
 		resp.ErrorMessage = "invalid username or password"
 		resp.ErrorCode = http.StatusUnprocessableEntity
 		return resp
@@ -66,6 +61,8 @@ func (service *UserServiceImpl) LoginUser(ctx context.Context, paramIn *LoginUse
 	token, err := service.generateToken(user.ID, user.Email, user.FullName, string(user.Role))
 	if err != nil {
 		service.Logger.ErrorErr(paramIn.Trace, err).Msg("LoginUser(): failed to create token")
+		resp.ErrorMessage = "generate token failed"
+		resp.ErrorCode = http.StatusInternalServerError
 		return resp
 	}
 
@@ -103,7 +100,7 @@ func (service *UserServiceImpl) generateToken(id uint, email string, name string
 
 func (service *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegisterIn) *UserRegisterOut {
 	resp := &UserRegisterOut{}
-	userRepo := service.UserStorage.BeginTx(ctx)
+	userRepo := service.UserStorage.NewUserRepositoryWrite(ctx)
 	defer userRepo.Rollback(ctx)
 
 	// Validate role
@@ -131,7 +128,7 @@ func (service *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegis
 	}
 
 	// Encrypt the password.
-	encryptPassword, err := helpers.Encrypt(service.Config.AuthSecret, paramIn.Password)
+	hashedPassword, err := helpers.HashPassword(paramIn.Password)
 	if err != nil {
 		service.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): encrypt password failed")
 		resp.ErrorMessage = err.Error()
@@ -145,7 +142,7 @@ func (service *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegis
 	user.ExternalID = uuid.New().String()
 	user.Username = paramIn.Username
 	user.Email = paramIn.Email
-	user.Password = encryptPassword
+	user.Password = hashedPassword
 	user.FullName = paramIn.FullName
 	user.Role = enum.Role(paramIn.UserRole)
 	user.Timestamp = &model.Timestamp{
@@ -177,8 +174,7 @@ func (service *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegis
 
 func (service *UserServiceImpl) GetUser(ctx context.Context, paramIn *GetUserIn) *GetUserOut {
 	resp := &GetUserOut{}
-	userRepo := service.UserStorage.BeginTx(ctx)
-	defer userRepo.Rollback(ctx)
+	userRepo := service.UserStorage.NewUserRepositoryRead(ctx)
 
 	user, err := userRepo.FindUserByID(paramIn.UserID)
 
@@ -204,7 +200,7 @@ func (service *UserServiceImpl) GetUser(ctx context.Context, paramIn *GetUserIn)
 
 func (service *UserServiceImpl) InsertFcmToken(ctx context.Context, paramIn *InsertFcmTokenIn) *InsertFcmTokenOut {
 	resp := &InsertFcmTokenOut{}
-	userRepo := service.UserStorage.BeginTx(ctx)
+	userRepo := service.UserStorage.NewUserRepositoryWrite(ctx)
 	defer userRepo.Rollback(ctx)
 
 	// Check if user already exists based on its username. If yes, return error indicating that the username cannot be duplicated.
@@ -263,7 +259,7 @@ func (service *UserServiceImpl) InsertFcmToken(ctx context.Context, paramIn *Ins
 
 func (service *UserServiceImpl) DeleteFcmTokenBulk(ctx context.Context, paramIn *DeleteFcmTokenBulkIn) *DeleteFcmTokenBulkOut {
 	resp := &DeleteFcmTokenBulkOut{}
-	userRepo := service.UserStorage.BeginTx(ctx)
+	userRepo := service.UserStorage.NewUserRepositoryWrite(ctx)
 	defer userRepo.Rollback(ctx)
 
 	err := userRepo.DeleteFcmTokenBulk(paramIn.Tokens)
@@ -288,8 +284,7 @@ func (service *UserServiceImpl) DeleteFcmTokenBulk(ctx context.Context, paramIn 
 
 func (service *UserServiceImpl) GetUserFcmToken(ctx context.Context, paramIn *GetUserFcmTokenIn) *GetUserFcmTokenOut {
 	resp := &GetUserFcmTokenOut{}
-	userRepo := service.UserStorage.BeginTx(ctx)
-	defer userRepo.Rollback(ctx)
+	userRepo := service.UserStorage.NewUserRepositoryRead(ctx)
 
 	// Check if user already exists based on its username. If yes, return error indicating that the username cannot be duplicated.
 	isUserExists, err := userRepo.FindUserByID(paramIn.UserID)

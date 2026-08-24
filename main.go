@@ -45,11 +45,13 @@ func main() {
 	router.Use(logger.RouterLogger())
 	router.Use(metric.GinMiddleware())
 
-	// TODO: Before deploying to production, replace AllowAllOrigins with an explicit
-	// AllowOrigins list for your frontend's domain(s). AllowAllOrigins + AllowCredentials
-	// together means any website can make credentialed requests to this API.
+	// TODO: Before deploying to production, set AllowAllOrigins to false
+	// and configure HOST_DOMAIN with a comma-separated list of allowed
+	// frontend origins, e.g. "https://example.com,https://admin.example.com".
+	// AllowAllOrigins + AllowCredentials allows credentialed requests from any origin.
 	router.Use(cors.New(cors.Config{
-		AllowAllOrigins:  true,
+		AllowAllOrigins: true,
+		//AllowOrigins:     strings.Split(loadConfig.HostDomain, ","),
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
 		ExposeHeaders:    []string{"Content-Length", "Set-Cookie"},

@@ -33,14 +33,14 @@ func (*PsqlDatabase) SetupModels(log customLog.Logger, config *config.Config) *g
 		config.DbPassword,
 		config.DbName,
 		config.DbPort,
-		"Asia/Jakarta",
+		config.DbTimezone,
 	)
 
-	gormConfig := &gorm.Config{}
+	gormConfig := &gorm.Config{
+		SkipDefaultTransaction: true,
+	}
 	if config.LogType == "1" {
-		gormConfig = &gorm.Config{
-			Logger: logger.Default.LogMode(logger.Info), // Enable query logging
-		}
+		gormConfig.Logger = logger.Default.LogMode(logger.Info) // Enable query logging
 	}
 
 	DB, err = gorm.Open(postgres.Open(connName), gormConfig)
@@ -54,8 +54,6 @@ func (*PsqlDatabase) SetupModels(log customLog.Logger, config *config.Config) *g
 	}
 
 	err = DB.AutoMigrate(
-		// @Notes: Add model in here
-		&model.AuditLog{},
 		&model.FcmToken{},
 		&model.User{},
 	)
@@ -74,9 +72,9 @@ func (*PsqlDatabase) SetupModels(log customLog.Logger, config *config.Config) *g
 	}
 
 	// Configure connection pool
-	sqlDB.SetMaxOpenConns(10)               // Max open connections
-	sqlDB.SetMaxIdleConns(5)                // Max idle connections
-	sqlDB.SetConnMaxLifetime(1 * time.Hour) // Max connection lifetime
+	sqlDB.SetMaxOpenConns(config.DbMaxOpenConns) // Max open connections
+	sqlDB.SetMaxIdleConns(config.DbMaxIdleConns) // Max idle connections
+	sqlDB.SetConnMaxLifetime(15 * time.Minute)   // Max connection lifetime
 
 	// Call Seeder
 	err = initSeeder()

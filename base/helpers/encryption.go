@@ -1,57 +1,89 @@
 package helpers
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
-	"errors"
 	"fmt"
-	"io"
+	"strconv"
+	"strings"
+
+	"golang.org/x/crypto/argon2"
 )
 
-// Encrypt string to base64 crypto using AES
-func Encrypt(authSecret string, text string) (data string, err error) {
-	key := []byte(authSecret)
-	encryptPass := []byte(text)
+func HashPassword(password string) (string, error) {
+	salt := make([]byte, 16)
 
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return data, err
+	if _, err := rand.Read(salt); err != nil {
+		return "", err
 	}
 
-	ciphertext := make([]byte, aes.BlockSize+len(encryptPass))
+	hash := argon2.IDKey(
+		[]byte(password),
+		salt,
+		1,
+		64*1024,
+		4,
+		32,
+	)
 
-	iv := ciphertext[:aes.BlockSize]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-		return data, err
-	}
-
-	stream := cipher.NewCFBEncrypter(block, iv)
-	stream.XORKeyStream(ciphertext[aes.BlockSize:], encryptPass)
-
-	// convert to base64
-	return base64.URLEncoding.EncodeToString(ciphertext), nil
+	return fmt.Sprintf(
+		"argon2id$v=19$m=65536,t=1,p=4$%s$%s",
+		base64.RawStdEncoding.EncodeToString(salt),
+		base64.RawStdEncoding.EncodeToString(hash),
+	), nil
 }
 
-// Decrypt from base64 to decrypted string
-func Decrypt(authSecret string, cryptoText string) (data string, err error) {
-	ciphertext, _ := base64.URLEncoding.DecodeString(cryptoText)
-	key := []byte(authSecret)
-	block, err := aes.NewCipher(key)
+func VerifyPassword(password, encodedHash string) bool {
+	parts := strings.Split(encodedHash, "$")
+	if len(parts) != 5 {
+		return false
+	}
+
+	// argon2id$v=19$m=65536,t=1,p=4$<salt>$<hash>
+	if parts[0] != "argon2id" || parts[1] != "v=19" {
+		return false
+	}
+
+	// Parse m=65536,t=1,p=4
+	params := strings.Split(parts[2], ",")
+	if len(params) != 3 {
+		return false
+	}
+
+	memory, err := strconv.ParseUint(strings.TrimPrefix(params[0], "m="), 10, 32)
 	if err != nil {
-		return data, err
+		return false
 	}
 
-	if len(ciphertext) < aes.BlockSize {
-		return data, errors.New("ciphertext too short")
+	iterations, err := strconv.ParseUint(strings.TrimPrefix(params[1], "t="), 10, 32)
+	if err != nil {
+		return false
 	}
-	iv := ciphertext[:aes.BlockSize]
-	ciphertext = ciphertext[aes.BlockSize:]
 
-	stream := cipher.NewCFBDecrypter(block, iv)
+	parallelism, err := strconv.ParseUint(strings.TrimPrefix(params[2], "p="), 10, 8)
+	if err != nil {
+		return false
+	}
 
-	stream.XORKeyStream(ciphertext, ciphertext)
+	salt, err := base64.RawStdEncoding.DecodeString(parts[3])
+	if err != nil {
+		return false
+	}
 
-	return fmt.Sprintf("%s", ciphertext), nil
+	expectedHash, err := base64.RawStdEncoding.DecodeString(parts[4])
+	if err != nil {
+		return false
+	}
+
+	actualHash := argon2.IDKey(
+		[]byte(password),
+		salt,
+		uint32(iterations),
+		uint32(memory),
+		uint8(parallelism),
+		uint32(len(expectedHash)),
+	)
+
+	return subtle.ConstantTimeCompare(actualHash, expectedHash) == 1
 }

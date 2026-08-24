@@ -13,7 +13,9 @@ type Config struct {
 	DbHost                      string `mapstructure:"DB_HOST"`
 	DbPort                      string `mapstructure:"DB_PORT"`
 	DbDriver                    string `mapstructure:"DB_DRIVER"`
-	AuthSecret                  string `mapstructure:"AUTH_SECRET"`
+	DbTimezone                  string `mapstructure:"DB_TIMEZONE"`
+	DbMaxOpenConns              int    `mapstructure:"DB_MAX_OPEN_CONNS"`
+	DbMaxIdleConns              int    `mapstructure:"DB_MAX_IDLE_CONNS"`
 	JwtSecret                   string `mapstructure:"JWT_SECRET"`
 	JwtIssuer                   string `mapstructure:"JWT_ISSUER"`
 	ApiKey                      string `mapstructure:"API_KEY"`
