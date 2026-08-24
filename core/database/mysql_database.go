@@ -20,6 +20,7 @@ var _ Database = (*MysqlDatabase)(nil)
 
 type MysqlDatabase struct{}
 
+// SetupModels only handles the connection + pool config.
 func (*MysqlDatabase) SetupModels(log customLog.Logger, config *config.Config) *gorm.DB {
 	var err error
 	var DB *gorm.DB
@@ -27,20 +28,21 @@ func (*MysqlDatabase) SetupModels(log customLog.Logger, config *config.Config) *
 		TraceId: uuid.New().String(),
 	}
 
-	connName := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=%s",
-		config.DbHost,
+	// MySQL DSN format — NOT the same syntax as Postgres.
+	connName := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&loc=%s",
 		config.DbUser,
 		config.DbPassword,
-		config.DbName,
+		config.DbHost,
 		config.DbPort,
-		config.DbTimezone,
+		config.DbName,
+		config.DbTimezone, // e.g. "Local" or "Asia%2FJakarta" if it contains a slash
 	)
 
 	gormConfig := &gorm.Config{
 		SkipDefaultTransaction: true,
 	}
 	if config.LogType == "1" {
-		gormConfig.Logger = logger.Default.LogMode(logger.Info) // Enable query logging
+		gormConfig.Logger = logger.Default.LogMode(logger.Info)
 	}
 
 	DB, err = gorm.Open(mysql.Open(connName), gormConfig)
@@ -53,36 +55,42 @@ func (*MysqlDatabase) SetupModels(log customLog.Logger, config *config.Config) *
 		log.WarnNoTrace().Msg(fmt.Sprintf("Failed to attach telemetry plugin: %v", err))
 	}
 
-	err = DB.AutoMigrate(
-		// @Notes: Add model in here
-		&model.FcmToken{},
-		&model.User{},
-	)
-
-	if err != nil {
-		log.ErrorErr(trace, err).Msg("Migration Failed")
-		panic("Migration Failed!")
-	}
-
-	// Get the raw SQL DB object for connection pooling
 	sqlDB, err := DB.DB()
 	if err != nil {
 		log.FatalErr(trace, err).Msg("failed to get SQL DB")
 		panic("Get SQL DB failed")
-
 	}
 
-	// Configure connection pool
-	sqlDB.SetMaxOpenConns(config.DbMaxOpenConns) // Max open connections
-	sqlDB.SetMaxIdleConns(config.DbMaxIdleConns) // Max idle connections
-	sqlDB.SetConnMaxLifetime(15 * time.Minute)   // Max connection lifetime
-
-	// Call Seeder
-	err = initSeeder()
-	if err != nil {
-		log.ErrorErr(trace, err).Msg("init Seeder failed")
-		panic("init Seeder failed")
-	}
+	sqlDB.SetMaxOpenConns(config.DbMaxOpenConns)
+	sqlDB.SetMaxIdleConns(config.DbMaxIdleConns)
+	sqlDB.SetConnMaxLifetime(15 * time.Minute)
 
 	return DB
+}
+
+// MigrateModels runs AutoMigrate. Call this explicitly via the migrate command.
+func (*MysqlDatabase) MigrateModels(log customLog.Logger, DB *gorm.DB) error {
+	trace := &logtrace.LogTrace{TraceId: uuid.New().String()}
+
+	err := DB.AutoMigrate(
+		// @Notes: Add model in here
+		&model.FcmToken{},
+		&model.User{},
+	)
+	if err != nil {
+		log.ErrorErr(trace, err).Msg("Migration Failed")
+		return err
+	}
+	return nil
+}
+
+// SeedModels runs the seeder. Call this explicitly via the seed command.
+func (*MysqlDatabase) SeedModels(log customLog.Logger) error {
+	trace := &logtrace.LogTrace{TraceId: uuid.New().String()}
+
+	if err := initSeeder(); err != nil {
+		log.ErrorErr(trace, err).Msg("init Seeder failed")
+		return err
+	}
+	return nil
 }

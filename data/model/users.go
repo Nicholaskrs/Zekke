@@ -12,7 +12,7 @@ type User struct {
 	Email      string     `gorm:"column:email;type:varchar(255)"`
 	Password   string     `gorm:"column:password;type:varchar(255)"`
 	FullName   string     `gorm:"column:full_name;type:varchar(255)"`
-	Role       enum.Role  `gorm:"column:role;type:user_role"`
+	Role       enum.Role  `gorm:"column:role;type:varchar(255)"`
 	Timestamp  *Timestamp `gorm:"embedded"`
 }
 

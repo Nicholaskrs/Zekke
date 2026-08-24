@@ -10,6 +10,8 @@ import (
 
 type Database interface {
 	SetupModels(log customLog.Logger, config *config.Config) *gorm.DB
+	MigrateModels(log customLog.Logger, DB *gorm.DB) error
+	SeedModels(log customLog.Logger) error
 }
 
 func NewEngine(cfg *config.Config) Database {

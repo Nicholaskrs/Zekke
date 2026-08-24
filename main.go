@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 	"template-go/core"
 	"template-go/core/database"
 	"template-go/core/telemetry/logger"
@@ -10,10 +11,12 @@ import (
 	"template-go/core/telemetry/trace"
 	routes "template-go/server/router"
 	"template-go/util/config"
+	"template-go/util/logtrace"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
@@ -21,6 +24,15 @@ func main() {
 	loadConfig, err := config.LoadConfig(".")
 	if err != nil {
 		log.Fatal("cannot load config:", err)
+	}
+
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	logger := logger.NewZerologLogger("Main")
+
+	// Handle CLI subcommands: go run main.go -- migrate | seed | migrate seed
+	if args := os.Args[1:]; len(args) > 0 {
+		runCommands(args, loadConfig, logger)
+		return
 	}
 
 	ctx := context.Background()
@@ -34,10 +46,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	zerolog.SetGlobalLevel(zerolog.DebugLevel)
-
-	logger := logger.NewZerologLogger("Main")
 
 	router := gin.New()
 	db := database.NewEngine(&loadConfig).SetupModels(logger, &loadConfig)
@@ -64,4 +72,31 @@ func main() {
 	routes.RegisterRoutes(router, deps)
 	metric.RegisterRoutes(router, metricsHandler, loadConfig)
 	router.Run(loadConfig.ServerPort)
+}
+
+// runCommands handles one-off DB operations (migrate/seed) without booting
+// the full server, tracing, or metrics stack.
+func runCommands(args []string, cfg config.Config, logger logger.Logger) {
+	engine := database.NewEngine(&cfg)
+	db := engine.SetupModels(logger, &cfg)
+
+	trace := &logtrace.LogTrace{
+		TraceId: uuid.New().String(),
+	}
+
+	for _, cmd := range args {
+		switch cmd {
+		case "migrate":
+			if err := engine.MigrateModels(logger, db); err != nil {
+				logger.ErrorErr(trace, err).Msg("migration failed")
+			}
+		case "seed":
+			if err := engine.SeedModels(logger); err != nil {
+				logger.ErrorErr(trace, err).Msg("seeding failed")
+			}
+		default:
+			logger.Error(trace).Msg("unknown command")
+			os.Exit(1)
+		}
+	}
 }

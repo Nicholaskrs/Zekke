@@ -20,6 +20,8 @@ var _ Database = (*PsqlDatabase)(nil)
 
 type PsqlDatabase struct{}
 
+// SetupModels only handles the connection + pool config.
+// It no longer runs migrations or seeding automatically.
 func (*PsqlDatabase) SetupModels(log customLog.Logger, config *config.Config) *gorm.DB {
 	var err error
 	var DB *gorm.DB
@@ -40,7 +42,7 @@ func (*PsqlDatabase) SetupModels(log customLog.Logger, config *config.Config) *g
 		SkipDefaultTransaction: true,
 	}
 	if config.LogType == "1" {
-		gormConfig.Logger = logger.Default.LogMode(logger.Info) // Enable query logging
+		gormConfig.Logger = logger.Default.LogMode(logger.Info)
 	}
 
 	DB, err = gorm.Open(postgres.Open(connName), gormConfig)
@@ -53,35 +55,41 @@ func (*PsqlDatabase) SetupModels(log customLog.Logger, config *config.Config) *g
 		log.WarnNoTrace().Msg(fmt.Sprintf("Failed to attach telemetry plugin: %v", err))
 	}
 
-	err = DB.AutoMigrate(
-		&model.FcmToken{},
-		&model.User{},
-	)
-
-	if err != nil {
-		log.ErrorErr(trace, err).Msg("Migration Failed")
-		panic("Migration Failed!")
-	}
-
-	// Get the raw SQL DB object for connection pooling
 	sqlDB, err := DB.DB()
 	if err != nil {
 		log.FatalErr(trace, err).Msg("failed to get PSQL DB")
 		panic("Get SQL DB failed")
-
 	}
 
-	// Configure connection pool
-	sqlDB.SetMaxOpenConns(config.DbMaxOpenConns) // Max open connections
-	sqlDB.SetMaxIdleConns(config.DbMaxIdleConns) // Max idle connections
-	sqlDB.SetConnMaxLifetime(15 * time.Minute)   // Max connection lifetime
-
-	// Call Seeder
-	err = initSeeder()
-	if err != nil {
-		log.ErrorErr(trace, err).Msg("init Seeder failed")
-		panic("init Seeder failed")
-	}
+	sqlDB.SetMaxOpenConns(config.DbMaxOpenConns)
+	sqlDB.SetMaxIdleConns(config.DbMaxIdleConns)
+	sqlDB.SetConnMaxLifetime(15 * time.Minute)
 
 	return DB
+}
+
+// MigrateModels runs AutoMigrate. Call this explicitly via the migrate command.
+func (*PsqlDatabase) MigrateModels(log customLog.Logger, DB *gorm.DB) error {
+	trace := &logtrace.LogTrace{TraceId: uuid.New().String()}
+
+	err := DB.AutoMigrate(
+		&model.FcmToken{},
+		&model.User{},
+	)
+	if err != nil {
+		log.ErrorErr(trace, err).Msg("Migration Failed")
+		return err
+	}
+	return nil
+}
+
+// SeedModels runs the seeder. Call this explicitly via the seed command.
+func (*PsqlDatabase) SeedModels(log customLog.Logger) error {
+	trace := &logtrace.LogTrace{TraceId: uuid.New().String()}
+
+	if err := initSeeder(); err != nil {
+		log.ErrorErr(trace, err).Msg("init Seeder failed")
+		return err
+	}
+	return nil
 }
