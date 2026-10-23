@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"template-go/api"
+	apiPublic "template-go/api/public"
 	"template-go/base/constants"
 	userSvc "template-go/modules/user/svc"
 	"template-go/util/logtrace"
@@ -26,13 +27,13 @@ func NewUserHandler(
 
 // Login used to authorize user
 func (handler *UserHandler) Login(c *gin.Context) {
-	response := &api.ApiAuthResp{}
+	response := apiPublic.AuthResp{}
 	trace := logtrace.GetLogTrace(c)
-	request := api.ApiAuthReq{}
+	request := apiPublic.AuthReq{}
 	if err := c.ShouldBind(&request); err != nil {
 		ve, ok := err.(validator.ValidationErrors)
 		if !ok {
-			api.ReturnInternalServerError(c, "login", constants.MethodNull, request, err, trace.TraceId)
+			api.ReturnInternalServerError(c, "login", constants.MethodNull, err, trace.TraceId)
 			return
 		}
 		api.ReturnValidationError(c, "login", constants.MethodNull, &request, ve, trace.TraceId)
@@ -51,12 +52,13 @@ func (handler *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
-	auth := &api.Auth{
-		Token:    authOut.Token,
-		UserID:   authOut.UserID,
-		UserRole: authOut.UserRole,
-		FullName: authOut.FullName,
-		Username: authOut.Username,
+	auth := &apiPublic.Auth{
+		Token:        authOut.Token,
+		UserID:       authOut.UserID,
+		UserRole:     authOut.UserRole,
+		FullName:     authOut.FullName,
+		Username:     authOut.Username,
+		RefreshToken: authOut.RefreshToken,
 	}
 	response.Auth = auth
 
@@ -66,14 +68,14 @@ func (handler *UserHandler) Login(c *gin.Context) {
 
 // Register used to register new user
 func (handler *UserHandler) Register(c *gin.Context) {
-	response := &api.UserRegisterResp{}
+	response := &apiPublic.UserRegisterResp{}
 	trace := logtrace.GetLogTrace(c)
 
-	request := api.UserRegisterReq{}
+	request := apiPublic.UserRegisterReq{}
 	if err := c.ShouldBind(&request); err != nil {
 		ve, ok := err.(validator.ValidationErrors)
 		if !ok {
-			api.ReturnInternalServerError(c, "register", constants.MethodNull, request, err, trace.TraceId)
+			api.ReturnInternalServerError(c, "register", constants.MethodNull, err, trace.TraceId)
 			return
 		}
 		api.ReturnValidationError(c, "register", constants.MethodNull, &request, ve, trace.TraceId)
@@ -109,14 +111,14 @@ func (handler *UserHandler) Register(c *gin.Context) {
 
 // GetUserProfile used to get user profile based on current logged user.
 func (handler *UserHandler) GetUserProfile(c *gin.Context) {
-	response := &api.GetUserProfileResp{}
+	response := &apiPublic.GetUserProfileResp{}
 	trace := logtrace.GetLogTrace(c)
 
 	ctx, cancel := context.WithTimeout(c, constants.TransactionTimeOut)
 	defer cancel()
 
 	// Get current user login role and id.
-	userID := c.GetInt("ID")
+	userID := c.GetInt(constants.ContextUserID)
 
 	// Call service.
 	svcOut := handler.UserService.GetUser(ctx,
@@ -132,7 +134,7 @@ func (handler *UserHandler) GetUserProfile(c *gin.Context) {
 	}
 
 	// Set response.
-	response.User = api.ParseUser(svcOut.User)
+	response.User = apiPublic.ParseUser(svcOut.User)
 
 	// Send response
 	api.ReturnResponse(c, "user", constants.MethodGet, response, "", http.StatusOK, trace.TraceId)
@@ -140,13 +142,13 @@ func (handler *UserHandler) GetUserProfile(c *gin.Context) {
 
 // InsertFcmToken used to insert user's fcm token for firebase purpose.
 func (handler *UserHandler) InsertFcmToken(c *gin.Context) {
-	response := &api.InsertFcmTokenResp{}
+	response := &apiPublic.InsertFcmTokenResp{}
 	trace := logtrace.GetLogTrace(c)
-	request := api.InsertFcmTokenReq{}
+	request := apiPublic.InsertFcmTokenReq{}
 	if err := c.ShouldBind(&request); err != nil {
 		ve, ok := err.(validator.ValidationErrors)
 		if !ok {
-			api.ReturnInternalServerError(c, "fcm token", constants.MethodCreate, request, err, trace.TraceId)
+			api.ReturnInternalServerError(c, "fcm token", constants.MethodCreate, err, trace.TraceId)
 			return
 		}
 		api.ReturnValidationError(c, "fcm token", constants.MethodCreate, &request, ve, trace.TraceId)
@@ -154,7 +156,7 @@ func (handler *UserHandler) InsertFcmToken(c *gin.Context) {
 	}
 
 	// Get current user login role and id
-	userID := c.GetInt("ID")
+	userID := c.GetInt(constants.ContextUserID)
 
 	// Call service
 	authOut := handler.UserService.InsertFcmToken(c,
@@ -174,13 +176,13 @@ func (handler *UserHandler) InsertFcmToken(c *gin.Context) {
 
 // DeleteFcmToken used to insert user's fcm token for firebase purpose.
 func (handler *UserHandler) DeleteFcmToken(c *gin.Context) {
-	response := &api.DeleteFcmTokenResp{}
+	response := &apiPublic.DeleteFcmTokenResp{}
 	trace := logtrace.GetLogTrace(c)
-	request := api.DeleteFcmTokenReq{}
+	request := apiPublic.DeleteFcmTokenReq{}
 	if err := c.ShouldBind(&request); err != nil {
 		ve, ok := err.(validator.ValidationErrors)
 		if !ok {
-			api.ReturnInternalServerError(c, "fcm token", constants.MethodDelete, request, err, trace.TraceId)
+			api.ReturnInternalServerError(c, "fcm token", constants.MethodDelete, err, trace.TraceId)
 			return
 		}
 		api.ReturnValidationError(c, "fcm token", constants.MethodDelete, &request, ve, trace.TraceId)
@@ -200,4 +202,47 @@ func (handler *UserHandler) DeleteFcmToken(c *gin.Context) {
 
 	// Send response
 	api.ReturnResponse(c, "fcm token", constants.MethodNull, response, "", http.StatusOK, trace.TraceId)
+}
+
+// Refresh used to get new access token.
+func (handler *UserHandler) Refresh(c *gin.Context) {
+	response := &apiPublic.RefreshResp{}
+	trace := logtrace.GetLogTrace(c)
+	request := apiPublic.RefreshReq{}
+	if err := c.ShouldBind(&request); err != nil {
+		ve, ok := err.(validator.ValidationErrors)
+		if !ok {
+			api.ReturnInternalServerError(c, "refresh", constants.MethodNull, err, trace.TraceId)
+			return
+		}
+		api.ReturnValidationError(c, "refresh", constants.MethodNull, &request, ve, trace.TraceId)
+		return
+	}
+	ctx, cancel := context.WithTimeout(c, constants.TransactionTimeOut)
+	defer cancel()
+
+	// Get current user login id.
+	userID := c.GetInt(constants.ContextUserID)
+
+	// Call service.
+	svcOut := handler.UserService.Refresh(ctx,
+		&userSvc.RefreshIn{
+			Trace:        trace,
+			RefreshToken: request.RefreshToken,
+			UserId:       userID,
+		},
+	)
+
+	if !svcOut.Success {
+		api.ReturnResponse(c, "refresh", constants.MethodNull, nil, svcOut.ErrorMessage, svcOut.ErrorCode, trace.TraceId)
+		return
+	}
+
+	response = &apiPublic.RefreshResp{
+		RefreshToken: svcOut.RefreshToken,
+		ExpiresIn:    svcOut.ExpireIn,
+	}
+
+	// Send response
+	api.ReturnResponse(c, "refresh", constants.MethodNull, response, "", http.StatusOK, trace.TraceId)
 }

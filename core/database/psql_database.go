@@ -75,6 +75,12 @@ func (*PsqlDatabase) MigrateModels(log customLog.Logger, DB *gorm.DB) error {
 	err := DB.AutoMigrate(
 		&model.FcmToken{},
 		&model.User{},
+		&model.Role{},
+		&model.RefreshToken{},
+		&model.PrivilegeGroup{},
+		&model.UserPrivilegeGroup{},
+		&model.Privilege{},
+		&model.PrivilegeGroupPrivilege{},
 	)
 	if err != nil {
 		log.ErrorErr(trace, err).Msg("Migration Failed")
@@ -84,10 +90,10 @@ func (*PsqlDatabase) MigrateModels(log customLog.Logger, DB *gorm.DB) error {
 }
 
 // SeedModels runs the seeder. Call this explicitly via the seed command.
-func (*PsqlDatabase) SeedModels(log customLog.Logger) error {
+func (*PsqlDatabase) SeedModels(log customLog.Logger, DB *gorm.DB) error {
 	trace := &logtrace.LogTrace{TraceId: uuid.New().String()}
 
-	if err := initSeeder(); err != nil {
+	if err := initSeeder(DB); err != nil {
 		log.ErrorErr(trace, err).Msg("init Seeder failed")
 		return err
 	}

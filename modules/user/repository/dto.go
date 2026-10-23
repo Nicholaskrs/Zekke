@@ -1,11 +1,9 @@
 package user
 
-import (
-	dto "template-go/base/base"
-	"template-go/data/enum"
-)
+import dto "template-go/base/base"
 
 type FilterUser struct {
 	dto.PaginateIn
-	Role enum.Role
+	Role      string
+	IsDeleted bool
 }

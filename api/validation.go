@@ -2,34 +2,15 @@ package api
 
 import (
 	"fmt"
-	"github.com/go-playground/validator/v10"
 	"reflect"
 	"strings"
+
+	"github.com/go-playground/validator/v10"
 )
-
-type ApiResponse struct {
-	TraceID          string            `json:"trace_id"`
-	Message          string            `json:"message"`
-	Data             interface{}       `json:"data"`
-	Meta             *MetaResponse     `json:"meta,omitempty"`
-	ValidationErrors []ValidationError `json:"errors"`
-}
-
-// MetaResponse used for pagination. Will be set into nil if there is no pagination in the BaseResponse.Data.
-type MetaResponse struct {
-	Page      int   `json:"page"`
-	Limit     int   `json:"limit"`
-	TotalRows int64 `json:"totalRows"`
-}
 
 type ValidationError struct {
 	Field string `json:"field"`
 	Msg   string `json:"message"`
-}
-
-type PaginateRequest struct {
-	Page  int `form:"page" binding:"required,min=1"`
-	Limit int `form:"limit" binding:"required,min=1,max=100"`
 }
 
 func ValidationMessage(tag string, param string) string {

@@ -1,5 +1,9 @@
 package api
 
+import (
+	"template-go/api"
+)
+
 type UserRegisterReq struct {
 	Username string `json:"username" binding:"required,ascii"`
 	Password string `json:"password" binding:"required,ascii"`
@@ -9,11 +13,11 @@ type UserRegisterReq struct {
 }
 
 type UserRegisterResp struct {
-	*ApiResponse
+	*api.Response
 }
 
 type GetUserProfileResp struct {
-	*ApiResponse
+	*api.Response
 	User *User `json:"user"`
 }
 
@@ -21,12 +25,12 @@ type InsertFcmTokenReq struct {
 	Token string `json:"token" binding:"required"`
 }
 type InsertFcmTokenResp struct {
-	*ApiResponse
+	*api.Response
 }
 
 type DeleteFcmTokenReq struct {
 	Token string `json:"token" binding:"required"`
 }
 type DeleteFcmTokenResp struct {
-	*ApiResponse
+	*api.Response
 }

@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"template-go/base/constants"
 	"template-go/base/helpers"
-	logger2 "template-go/core/telemetry/logger"
-	"template-go/data/enum"
+	"template-go/core/telemetry/logger"
 	"template-go/data/model"
 	user "template-go/modules/user/repository"
 	"template-go/util/config"
-	"time"
 
 	"gorm.io/gorm"
 
@@ -21,31 +20,31 @@ import (
 type UserServiceImpl struct {
 	UserStorage user.UserStorage
 	Config      config.Config
-	Logger      logger2.Logger
+	Logger      logger.Logger
 }
 
 func NewUserService(
 	UserStorage user.UserStorage,
 	Config config.Config,
-
 ) UserService {
 	return &UserServiceImpl{
 		UserStorage: UserStorage,
 		Config:      Config,
-		Logger:      logger2.NewZerologLogger("UserService"),
+		Logger:      logger.NewZerologLogger("UserService"),
 	}
 }
 
-func (service *UserServiceImpl) LoginUser(ctx context.Context, paramIn *LoginUserIn) *LoginUserOut {
+func (i *UserServiceImpl) LoginUser(ctx context.Context, paramIn *LoginUserIn) *LoginUserOut {
 	resp := &LoginUserOut{}
-	userRepo := service.UserStorage.NewUserRepositoryRead(ctx)
+	userRepo := i.UserStorage.NewUserRepositoryWrite(ctx)
+	defer userRepo.Rollback(ctx)
 
 	// Find user based on its username
 	user, err := userRepo.FindUserByUsername(paramIn.Username)
 	if err != nil {
-		service.Logger.WarnErr(paramIn.Trace, err).Msg("LoginUser(): invalid username or password")
+		i.Logger.WarnErr(paramIn.Trace, err).Msg("LoginUser(): invalid username or password")
 		resp.ErrorMessage = "invalid username or password"
-		resp.ErrorCode = http.StatusUnprocessableEntity
+		resp.ErrorCode = http.StatusUnauthorized
 		return resp
 	}
 
@@ -53,15 +52,57 @@ func (service *UserServiceImpl) LoginUser(ctx context.Context, paramIn *LoginUse
 	isVerified := helpers.VerifyPassword(paramIn.Password, user.Password)
 	if !isVerified {
 		resp.ErrorMessage = "invalid username or password"
-		resp.ErrorCode = http.StatusUnprocessableEntity
+		resp.ErrorCode = http.StatusUnauthorized
 		return resp
 	}
 
 	// Generate token.
-	token, err := service.generateToken(user.ID, user.Email, user.FullName, string(user.Role))
+	token, err := i.generateToken(user.ID, user.Email, user.FullName, user.Role)
 	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("LoginUser(): failed to create token")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("LoginUser(): failed to create token")
 		resp.ErrorMessage = "generate token failed"
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	refreshToken, err := helpers.RandomToken()
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("LoginUser(): failed to create random token")
+		resp.ErrorMessage = "generate refresh token failed"
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	now, err := helpers.TimeNow()
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): fail get current time")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+	expire := now.Add(constants.RefreshTTL)
+
+	err = userRepo.InsertRefreshToken(&model.RefreshToken{
+		UserID:    user.ID,
+		FamilyID:  uuid.NewString(),
+		TokenHash: helpers.HashToken(refreshToken),
+		ExpireAt:  &expire,
+		Timestamp: &model.Timestamp{
+			CreatedTs:     now,
+			LastUpdatedTs: now,
+		},
+	})
+	if err != nil {
+		i.Logger.WarnErr(paramIn.Trace, err).Msg("LoginUser(): failed to insert refresh token")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	err = userRepo.Commit(ctx)
+	if err != nil {
+		i.Logger.WarnErr(paramIn.Trace, err).Msg("LoginUser(): failed to commit")
+		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
 	}
@@ -69,59 +110,72 @@ func (service *UserServiceImpl) LoginUser(ctx context.Context, paramIn *LoginUse
 	resp.Success = true
 	resp.Token = token
 	resp.UserID = user.ID
-	resp.UserRole = string(user.Role)
+	resp.UserRole = user.Role
 	resp.FullName = user.FullName
 	resp.Username = user.Username
+	resp.RefreshToken = refreshToken
 	return resp
 }
 
 // generateToken used to generate token that used in Login. It sets claims filled with user's id, email, name, and role.
-func (service *UserServiceImpl) generateToken(id uint, email string, name string, role string) (string, error) {
+func (i *UserServiceImpl) generateToken(id uint, email string, name string, role string) (string, error) {
+	now, err := helpers.TimeNow()
+	if err != nil {
+		return "", err
+	}
 	claims := &AuthCustomClaims{
 		id,
 		email,
 		name,
 		role,
 		jwt.StandardClaims{
-			ExpiresAt: time.Now().Add(time.Hour * 24).Unix(),
-			Issuer:    service.Config.JwtIssuer,
-			IssuedAt:  time.Now().Unix(),
+			ExpiresAt: now.Add(constants.AccessTTL).Unix(),
+			Issuer:    i.Config.JwtIssuer,
+			IssuedAt:  now.Unix(),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	//encoded string
-	tokenStr, err := token.SignedString([]byte(service.Config.JwtSecret))
+	tokenStr, err := token.SignedString([]byte(i.Config.JwtSecret))
 	if err != nil {
 		return "", err
 	}
 	return tokenStr, nil
 }
 
-func (service *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegisterIn) *UserRegisterOut {
+func (i *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegisterIn) *UserRegisterOut {
 	resp := &UserRegisterOut{}
-	userRepo := service.UserStorage.NewUserRepositoryWrite(ctx)
+	userRepo := i.UserStorage.NewUserRepositoryWrite(ctx)
 	defer userRepo.Rollback(ctx)
 
 	// Validate role
-	if !helpers.InArray(enum.SliceRole, paramIn.UserRole) {
-		service.Logger.Warn(paramIn.Trace).Msg("Register(): invalid role type")
-		resp.ErrorMessage = "invalid role type"
-		resp.ErrorCode = http.StatusUnprocessableEntity
+	isRoleExists, err := userRepo.CheckRoleExists(paramIn.UserRole)
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): failed to check role exists")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	if !isRoleExists {
+		i.Logger.Warn(paramIn.Trace).Msg("Register(): role not found")
+		resp.ErrorMessage = "role not found"
+		resp.ErrorCode = http.StatusBadRequest
 		return resp
 	}
 
 	// Check if user already exists based on its username. If yes, return error indicating that the username cannot be duplicated.
 	isUserExists, err := userRepo.CheckUserExistsByUsername(paramIn.Username)
 	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): failed to check user by username")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): failed to check user by username")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
 	}
 
 	if isUserExists {
-		service.Logger.Warn(paramIn.Trace).Msg("Register(): username already exists")
+		i.Logger.Warn(paramIn.Trace).Msg("Register(): username already exists")
 		resp.ErrorMessage = "username already exists"
 		resp.ErrorCode = http.StatusUnprocessableEntity
 		return resp
@@ -130,21 +184,28 @@ func (service *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegis
 	// Encrypt the password.
 	hashedPassword, err := helpers.HashPassword(paramIn.Password)
 	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): encrypt password failed")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): encrypt password failed")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
 	}
 
 	// Set user entity.
-	now := time.Now().Local()
+	now, err := helpers.TimeNow()
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): fail get current time")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
 	var user model.User
 	user.ExternalID = uuid.New().String()
 	user.Username = paramIn.Username
 	user.Email = paramIn.Email
 	user.Password = hashedPassword
 	user.FullName = paramIn.FullName
-	user.Role = enum.Role(paramIn.UserRole)
+	user.Role = paramIn.UserRole
 	user.Timestamp = &model.Timestamp{
 		CreatedTs:     now,
 		LastUpdatedTs: now,
@@ -152,17 +213,15 @@ func (service *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegis
 
 	_, err = userRepo.CreateUser(&user)
 	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): failed to create user")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): failed to create user")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
 	}
 
-	// TODO: Add audit log.
-
 	err = userRepo.Commit(ctx)
 	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): commit failed")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): commit failed")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
@@ -172,22 +231,22 @@ func (service *UserServiceImpl) Register(ctx context.Context, paramIn *UserRegis
 	return resp
 }
 
-func (service *UserServiceImpl) GetUser(ctx context.Context, paramIn *GetUserIn) *GetUserOut {
+func (i *UserServiceImpl) GetUser(ctx context.Context, paramIn *GetUserIn) *GetUserOut {
 	resp := &GetUserOut{}
-	userRepo := service.UserStorage.NewUserRepositoryRead(ctx)
+	userRepo := i.UserStorage.NewUserRepositoryRead(ctx)
 
 	user, err := userRepo.FindUserByID(paramIn.UserID)
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			service.Logger.ErrorErr(paramIn.Trace, err).
+			i.Logger.ErrorErr(paramIn.Trace, err).
 				Int("UserID", int(paramIn.UserID)).
 				Msg("GetUser(): UserID Not found")
 			resp.ErrorMessage = err.Error()
 			resp.ErrorCode = http.StatusNotFound
 			return resp
 		}
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("GetUser(): failed to FindUserByID")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("GetUser(): failed to FindUserByID")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusNotFound
 		return resp
@@ -198,37 +257,43 @@ func (service *UserServiceImpl) GetUser(ctx context.Context, paramIn *GetUserIn)
 	return resp
 }
 
-func (service *UserServiceImpl) InsertFcmToken(ctx context.Context, paramIn *InsertFcmTokenIn) *InsertFcmTokenOut {
+func (i *UserServiceImpl) InsertFcmToken(ctx context.Context, paramIn *InsertFcmTokenIn) *InsertFcmTokenOut {
 	resp := &InsertFcmTokenOut{}
-	userRepo := service.UserStorage.NewUserRepositoryWrite(ctx)
+	userRepo := i.UserStorage.NewUserRepositoryWrite(ctx)
 	defer userRepo.Rollback(ctx)
 
 	// Check if user already exists based on its username. If yes, return error indicating that the username cannot be duplicated.
 	usr, err := userRepo.FindUserByID(paramIn.UserID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			service.Logger.ErrorErr(paramIn.Trace, err).
+			i.Logger.ErrorErr(paramIn.Trace, err).
 				Int("UserID", int(paramIn.UserID)).
 				Msg("InsertFcmToken(): UserID Not found")
 			resp.ErrorMessage = err.Error()
 			resp.ErrorCode = http.StatusNotFound
 			return resp
 		}
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("CreateFcmToken(): failed to check userID exists")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("CreateFcmToken(): failed to check userID exists")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
 	}
 
 	if usr == nil {
-		service.Logger.Warn(paramIn.Trace).Msg("CreateFcmToken(): user not found")
+		i.Logger.Warn(paramIn.Trace).Msg("CreateFcmToken(): user not found")
 		resp.ErrorMessage = "user not found"
 		resp.ErrorCode = http.StatusBadRequest
 		return resp
 	}
 
 	// Set user entity.
-	now := time.Now()
+	now, err := helpers.TimeNow()
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Register(): fail get current time")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
 
 	err = userRepo.CreateFcmToken(&model.FcmToken{
 		UserID:   paramIn.UserID,
@@ -239,7 +304,7 @@ func (service *UserServiceImpl) InsertFcmToken(ctx context.Context, paramIn *Ins
 		},
 	})
 	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("CreateFcmToken(): failed to create fcmToken")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("CreateFcmToken(): failed to create fcmToken")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
@@ -247,7 +312,7 @@ func (service *UserServiceImpl) InsertFcmToken(ctx context.Context, paramIn *Ins
 
 	err = userRepo.Commit(ctx)
 	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("CreateFcmToken(): commit failed")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("CreateFcmToken(): commit failed")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
@@ -257,14 +322,14 @@ func (service *UserServiceImpl) InsertFcmToken(ctx context.Context, paramIn *Ins
 	return resp
 }
 
-func (service *UserServiceImpl) DeleteFcmTokenBulk(ctx context.Context, paramIn *DeleteFcmTokenBulkIn) *DeleteFcmTokenBulkOut {
+func (i *UserServiceImpl) DeleteFcmTokenBulk(ctx context.Context, paramIn *DeleteFcmTokenBulkIn) *DeleteFcmTokenBulkOut {
 	resp := &DeleteFcmTokenBulkOut{}
-	userRepo := service.UserStorage.NewUserRepositoryWrite(ctx)
+	userRepo := i.UserStorage.NewUserRepositoryWrite(ctx)
 	defer userRepo.Rollback(ctx)
 
 	err := userRepo.DeleteFcmTokenBulk(paramIn.Tokens)
 	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("DeleteFcmTokenBulk(): failed to create fcmToken")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("DeleteFcmTokenBulk(): failed to create fcmToken")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
@@ -272,7 +337,7 @@ func (service *UserServiceImpl) DeleteFcmTokenBulk(ctx context.Context, paramIn 
 
 	err = userRepo.Commit(ctx)
 	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("DeleteFcmTokenBulk(): commit failed")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("DeleteFcmTokenBulk(): commit failed")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
@@ -282,21 +347,21 @@ func (service *UserServiceImpl) DeleteFcmTokenBulk(ctx context.Context, paramIn 
 	return resp
 }
 
-func (service *UserServiceImpl) GetUserFcmToken(ctx context.Context, paramIn *GetUserFcmTokenIn) *GetUserFcmTokenOut {
+func (i *UserServiceImpl) GetUserFcmToken(ctx context.Context, paramIn *GetUserFcmTokenIn) *GetUserFcmTokenOut {
 	resp := &GetUserFcmTokenOut{}
-	userRepo := service.UserStorage.NewUserRepositoryRead(ctx)
+	userRepo := i.UserStorage.NewUserRepositoryRead(ctx)
 
 	// Check if user already exists based on its username. If yes, return error indicating that the username cannot be duplicated.
 	isUserExists, err := userRepo.FindUserByID(paramIn.UserID)
 	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("GetUserFcmToken(): failed to check userID exists")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("GetUserFcmToken(): failed to check userID exists")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
 	}
 
 	if isUserExists == nil {
-		service.Logger.Warn(paramIn.Trace).Msg("GetUserFcmToken(): user not found")
+		i.Logger.Warn(paramIn.Trace).Msg("GetUserFcmToken(): user not found")
 		resp.ErrorMessage = "user not found"
 		resp.ErrorCode = http.StatusBadRequest
 		return resp
@@ -304,7 +369,7 @@ func (service *UserServiceImpl) GetUserFcmToken(ctx context.Context, paramIn *Ge
 
 	fcmTokens, err := userRepo.GetUserFcmToken(paramIn.UserID)
 	if err != nil {
-		service.Logger.ErrorErr(paramIn.Trace, err).Msg("GetUserFcmToken(): failed to create fcmToken")
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("GetUserFcmToken(): failed to create fcmToken")
 		resp.ErrorMessage = err.Error()
 		resp.ErrorCode = http.StatusInternalServerError
 		return resp
@@ -312,5 +377,119 @@ func (service *UserServiceImpl) GetUserFcmToken(ctx context.Context, paramIn *Ge
 
 	resp.FcmTokens = fcmTokens
 	resp.Success = true
+	return resp
+}
+
+func (i *UserServiceImpl) Refresh(ctx context.Context, paramIn *RefreshIn) *RefreshOut {
+	resp := &RefreshOut{}
+	h := helpers.HashToken(paramIn.RefreshToken)
+
+	// Atomic: only one request can consume a given refresh token.
+	repo := i.UserStorage.NewUserRepositoryWrite(ctx)
+	defer repo.Rollback(ctx)
+
+	refreshToken, err := repo.LockRefreshToken(paramIn.UserId, h)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			resp.ErrorMessage = "Refresh token not found"
+			resp.ErrorCode = http.StatusNotFound
+		}
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to lock refresh token")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+	now, err := helpers.TimeNow()
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to read refresh token")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	if refreshToken.ExpireAt.Before(now) || refreshToken.RevokedAt != nil {
+		resp.ErrorMessage = "Token is expired"
+		resp.ErrorCode = http.StatusForbidden
+		return resp
+	}
+
+	if refreshToken.UsedAt != nil {
+		// Token is reused possibly stolen revoke everything that generated by this familyID.
+		err = repo.RevokeRefreshTokenByFamilyID(refreshToken.FamilyID)
+		if err != nil {
+			i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to revoke refresh token")
+			resp.ErrorMessage = err.Error()
+			resp.ErrorCode = http.StatusInternalServerError
+			return resp
+		}
+
+		resp.ErrorMessage = "Token is already used"
+		resp.ErrorCode = http.StatusForbidden
+		return resp
+
+	}
+
+	err = repo.UseRefreshToken(int(refreshToken.ID))
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to use refresh token")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	usr, err := repo.FindUserByID(refreshToken.UserID)
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to use get userid")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	token, err := i.generateToken(usr.ID, usr.Email, usr.FullName, usr.Role)
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to create token")
+		resp.ErrorMessage = "generate token failed"
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	expire := now.Add(constants.RefreshTTL)
+	newRefreshToken, err := helpers.RandomToken()
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to generate random token")
+		resp.ErrorMessage = "generate refresh token failed"
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	err = repo.InsertRefreshToken(&model.RefreshToken{
+		UserID:    usr.ID,
+		FamilyID:  refreshToken.FamilyID,
+		TokenHash: helpers.HashToken(newRefreshToken),
+		ExpireAt:  &expire,
+		Timestamp: &model.Timestamp{
+			CreatedTs:     now,
+			LastUpdatedTs: now,
+		},
+	})
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to insert refresh token")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	err = repo.Commit(ctx)
+	if err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to commit")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	resp.Success = true
+	resp.RefreshToken = newRefreshToken
+	resp.AccessToken = token
+	resp.ExpireIn = int(constants.RefreshTTL.Seconds())
 	return resp
 }

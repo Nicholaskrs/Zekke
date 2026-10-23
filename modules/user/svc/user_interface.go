@@ -25,6 +25,8 @@ type UserService interface {
 	DeleteFcmTokenBulk(ctx context.Context, paramIn *DeleteFcmTokenBulkIn) *DeleteFcmTokenBulkOut
 
 	GetUserFcmToken(ctx context.Context, paramIn *GetUserFcmTokenIn) *GetUserFcmTokenOut
+
+	Refresh(ctx context.Context, paramIn *RefreshIn) *RefreshOut
 }
 
 type LoginUserIn struct {
@@ -35,11 +37,12 @@ type LoginUserIn struct {
 
 type LoginUserOut struct {
 	dto.BaseOut
-	Token    string
-	UserID   uint
-	UserRole string
-	FullName string
-	Username string
+	Token        string
+	UserID       uint
+	UserRole     string
+	FullName     string
+	Username     string
+	RefreshToken string
 }
 
 type AuthCustomClaims struct {
@@ -63,44 +66,14 @@ type UserRegisterOut struct {
 	dto.BaseOut
 }
 
-type ChangePasswordIn struct {
-	Trace      *logtrace.LogTrace
-	ExternalID string
-	Password   string
-	UserID     uint
-}
-
-type ChangePasswordOut struct {
-	dto.BaseOut
-}
-
 type GetUserIn struct {
 	Trace  *logtrace.LogTrace
 	UserID uint
 }
 
-type GetListUsersByRoleIn struct {
-	Trace  *logtrace.LogTrace
-	UserID uint
-}
-type GetListuserByRoleOut struct {
-	dto.BaseOut
-	UserIDs []uint
-}
-
 type GetUserOut struct {
 	dto.BaseOut
 	User *model.User
-}
-
-type GetDistributorIDByUserIDIn struct {
-	Trace  *logtrace.LogTrace
-	UserID uint
-}
-
-type GetDistributorIDByUserIDOut struct {
-	dto.BaseOut
-	DistributorID uint
 }
 
 type GetSalesUserIn struct {
@@ -109,26 +82,6 @@ type GetSalesUserIn struct {
 }
 
 type GetSalesUserOut struct {
-	dto.BaseOut
-	Users []*model.User
-}
-
-type GetSalesUsersByAreaIDIn struct {
-	Trace  *logtrace.LogTrace
-	AreaID uint
-}
-
-type GetSalesUsersByAreaIDOut struct {
-	dto.BaseOut
-	Users []*model.User
-}
-
-type GetUsersByDistributorIDIn struct {
-	Trace         *logtrace.LogTrace
-	DistributorID uint
-}
-
-type GetUsersByDistributorIDOut struct {
 	dto.BaseOut
 	Users []*model.User
 }
@@ -160,4 +113,17 @@ type GetUserFcmTokenIn struct {
 type GetUserFcmTokenOut struct {
 	dto.BaseOut
 	FcmTokens []*model.FcmToken
+}
+
+type RefreshIn struct {
+	Trace        *logtrace.LogTrace
+	UserId       int
+	RefreshToken string
+}
+
+type RefreshOut struct {
+	dto.BaseOut
+	AccessToken  string
+	RefreshToken string
+	ExpireIn     int
 }
