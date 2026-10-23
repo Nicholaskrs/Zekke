@@ -1,9 +1,13 @@
 package api
 
+import (
+	"template-go/api"
+)
+
 type HealthCheckReq struct {
 }
 
 type HealthCheckResp struct {
-	*ApiResponse
+	*api.Response
 	Health *Health `json:"health"`
 }

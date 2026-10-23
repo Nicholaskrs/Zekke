@@ -85,10 +85,10 @@ func (*MysqlDatabase) MigrateModels(log customLog.Logger, DB *gorm.DB) error {
 }
 
 // SeedModels runs the seeder. Call this explicitly via the seed command.
-func (*MysqlDatabase) SeedModels(log customLog.Logger) error {
+func (*MysqlDatabase) SeedModels(log customLog.Logger, DB *gorm.DB) error {
 	trace := &logtrace.LogTrace{TraceId: uuid.New().String()}
 
-	if err := initSeeder(); err != nil {
+	if err := initSeeder(DB); err != nil {
 		log.ErrorErr(trace, err).Msg("init Seeder failed")
 		return err
 	}

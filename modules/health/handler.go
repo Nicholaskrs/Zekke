@@ -3,6 +3,7 @@ package health
 import (
 	"net/http"
 	"template-go/api"
+	apiPublic "template-go/api/public"
 	"template-go/base/constants"
 	"template-go/modules/health/svc"
 	"template-go/util/logtrace"
@@ -25,13 +26,13 @@ func NewHealthCheckHandler(
 
 // TestHealth used to check service by return success.
 func (handler *HealthCheckHandler) TestHealth(c *gin.Context) {
-	response := &api.HealthCheckResp{}
+	response := &apiPublic.HealthCheckResp{}
 	trace := logtrace.GetLogTrace(c)
-	request := api.HealthCheckReq{}
+	request := apiPublic.HealthCheckReq{}
 	if err := c.ShouldBind(&request); err != nil {
 		ve, ok := err.(validator.ValidationErrors)
 		if !ok {
-			api.ReturnInternalServerError(c, "health", constants.MethodGet, request, err, trace.TraceId)
+			api.ReturnInternalServerError(c, "health", constants.MethodGet, err, trace.TraceId)
 			return
 		}
 		api.ReturnValidationError(c, "health", constants.MethodGet, &request, ve, trace.TraceId)
@@ -45,7 +46,7 @@ func (handler *HealthCheckHandler) TestHealth(c *gin.Context) {
 		return
 	}
 
-	health := api.ParseHealth(healthCheckOut.Health)
+	health := apiPublic.ParseHealth(healthCheckOut.Health)
 	response.Health = health
 
 	// Send response

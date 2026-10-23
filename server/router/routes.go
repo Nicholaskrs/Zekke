@@ -3,6 +3,7 @@ package routes
 import (
 	"template-go/core"
 	"template-go/modules/health"
+	"template-go/modules/permission"
 	"template-go/modules/user"
 	"template-go/server/middleware"
 
@@ -23,6 +24,11 @@ func RegisterRoutes(router *gin.Engine, deps *core.HandlerDependencies) {
 
 	// Require Authentication Routes.
 	authenticatedRoutes(deps, v1)
+
+	// Admin routes.
+	adminr := r.Group("/admin")
+	authorizeAdminRoutes(deps, adminr)
+	authenticatedAdminRoutes(deps, adminr)
 
 	// Public routes
 	rInternal := router.Group("/api-internal")
@@ -52,5 +58,15 @@ func authenticatedRoutes(deps *core.HandlerDependencies, v1 *gin.RouterGroup) {
 // Use X-API-Key authentication
 func internalAuthenticatedRoutes(deps *core.HandlerDependencies, v1 *gin.RouterGroup) {
 	v1.Use(middleware.InternalMiddleware(deps.Config))
-	user.SetRouterAdmin(v1, deps.UserService)
+	user.SetRouterInternal(v1, deps.UserService)
+}
+
+func authenticatedAdminRoutes(deps *core.HandlerDependencies, v1 *gin.RouterGroup) {
+	v1.Use(middleware.AuthorizeAdminJWT(deps.Config))
+	user.SetRouterAuthenticatedAdmin(v1, deps.UserAdminService)
+	permission.SetRouterAdmin(v1, deps.PermissionAdminService)
+}
+
+func authorizeAdminRoutes(deps *core.HandlerDependencies, v1 *gin.RouterGroup) {
+	user.SetRouterAuthorizeAdmin(v1, deps.UserAdminService)
 }

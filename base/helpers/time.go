@@ -1,6 +1,7 @@
 package helpers
 
 import (
+	"template-go/base/constants"
 	"time"
 )
 
@@ -12,4 +13,13 @@ func TodayDate(timezone string) (time.Time, error) {
 	}
 	now := time.Now().In(loc)
 	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc), nil
+}
+
+func TimeNow() (time.Time, error) {
+	loc, err := time.LoadLocation(constants.Timezone)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Now().In(loc), nil
+
 }

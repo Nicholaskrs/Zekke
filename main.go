@@ -29,7 +29,7 @@ func main() {
 	zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	logger := logger.NewZerologLogger("Main")
 
-	// Handle CLI subcommands: go run main.go -- migrate | seed | migrate seed
+	// Handle CLI subcommands: go run main.go  migrate | seed | migrate seed
 	if args := os.Args[1:]; len(args) > 0 {
 		runCommands(args, loadConfig, logger)
 		return
@@ -47,8 +47,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	router := gin.New()
 	db := database.NewEngine(&loadConfig).SetupModels(logger, &loadConfig)
+
+	router := gin.New()
 	router.Use(trace.GinHandler)
 	router.Use(logger.RouterLogger())
 	router.Use(metric.GinMiddleware())
@@ -91,7 +92,7 @@ func runCommands(args []string, cfg config.Config, logger logger.Logger) {
 				logger.ErrorErr(trace, err).Msg("migration failed")
 			}
 		case "seed":
-			if err := engine.SeedModels(logger); err != nil {
+			if err := engine.SeedModels(logger, db); err != nil {
 				logger.ErrorErr(trace, err).Msg("seeding failed")
 			}
 		default:

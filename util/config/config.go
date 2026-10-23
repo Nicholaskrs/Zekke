@@ -16,6 +16,10 @@ type Config struct {
 	DbTimezone                  string `mapstructure:"DB_TIMEZONE"`
 	DbMaxOpenConns              int    `mapstructure:"DB_MAX_OPEN_CONNS"`
 	DbMaxIdleConns              int    `mapstructure:"DB_MAX_IDLE_CONNS"`
+	RedisAddr                   string `mapstructure:"REDIS_ADDR"`
+	RedisPort                   string `mapstructure:"REDIS_PORT"`
+	RedisPassword               string `mapstructure:"REDIS_PASSWORD"`
+	RedisUsername               string `mapstructure:"REDIS_USERNAME"`
 	JwtSecret                   string `mapstructure:"JWT_SECRET"`
 	JwtIssuer                   string `mapstructure:"JWT_ISSUER"`
 	ApiKey                      string `mapstructure:"API_KEY"`
