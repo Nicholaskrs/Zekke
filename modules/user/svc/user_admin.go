@@ -276,7 +276,6 @@ func (i *UserAdminServiceImpl) Refresh(ctx context.Context, paramIn *AdminRefres
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			resp.ErrorMessage = "Refresh token not found"
 			resp.ErrorCode = http.StatusNotFound
-			i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to lock refresh token")
 			return resp
 		}
 		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to lock refresh token")
