@@ -354,9 +354,13 @@ func (i *UserServiceImpl) GetUserFcmToken(ctx context.Context, paramIn *GetUserF
 	// Check if user already exists based on its username. If yes, return error indicating that the username cannot be duplicated.
 	isUserExists, err := userRepo.FindUserByID(paramIn.UserID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			resp.ErrorCode = http.StatusNotFound
+		} else {
+			resp.ErrorCode = http.StatusInternalServerError
+		}
 		i.Logger.ErrorErr(paramIn.Trace, err).Msg("GetUserFcmToken(): failed to check userID exists")
 		resp.ErrorMessage = err.Error()
-		resp.ErrorCode = http.StatusInternalServerError
 		return resp
 	}
 
@@ -393,6 +397,8 @@ func (i *UserServiceImpl) Refresh(ctx context.Context, paramIn *RefreshIn) *Refr
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			resp.ErrorMessage = "Refresh token not found"
 			resp.ErrorCode = http.StatusNotFound
+			i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to lock refresh token")
+			return resp
 		}
 		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to lock refresh token")
 		resp.ErrorMessage = err.Error()
@@ -418,6 +424,12 @@ func (i *UserServiceImpl) Refresh(ctx context.Context, paramIn *RefreshIn) *Refr
 		err = repo.RevokeRefreshTokenByFamilyID(refreshToken.FamilyID)
 		if err != nil {
 			i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to revoke refresh token")
+			resp.ErrorMessage = err.Error()
+			resp.ErrorCode = http.StatusInternalServerError
+			return resp
+		}
+		if err = repo.Commit(ctx); err != nil {
+			i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to commit token revocation")
 			resp.ErrorMessage = err.Error()
 			resp.ErrorCode = http.StatusInternalServerError
 			return resp

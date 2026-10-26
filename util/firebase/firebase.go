@@ -36,6 +36,10 @@ type Client struct {
 	logger logger2.Logger
 }
 
+type Sender interface {
+	Send(ctx context.Context, title string, body string, data map[string]string, token string) (string, error)
+}
+
 func (n *Client) Send(ctx context.Context, title string, body string, data map[string]string, token string) (string, error) {
 	return n.client.Send(ctx, &messaging.Message{
 		Data:  data,
