@@ -18,73 +18,77 @@ import (
 	"template-go/util/firebase"
 )
 
+type notificationExpected struct {
+	success     bool
+	errorCode   int
+	userCalls   int
+	sendCalls   int
+	deleteCalls int
+}
+
+type notificationTestCase struct {
+	name     string
+	input    *notificationSvc.SendPushNotificationIn
+	expected notificationExpected
+	mock     func(t *testing.T, f *notificationFixture)
+	sender   func(t *testing.T) firebase.Sender
+}
+
 func TestNotificationService_SendPushNotification(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name            string
-		input           *notificationSvc.SendPushNotificationIn
-		setup           func(f *notificationFixture)
-		sender          func(t *testing.T) firebase.Sender
-		wantSuccess     bool
-		wantCode        int
-		wantUserCalls   int
-		wantSendCalls   int
-		wantDeleteCalls int
-	}{
+	tests := []notificationTestCase{
 		{
 			name: "validates required title before dependencies",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 1, Body: "body",
 			},
-			wantCode: http.StatusUnprocessableEntity,
+			expected: notificationExpected{errorCode: http.StatusUnprocessableEntity},
 		},
 		{
 			name: "validates required body before dependencies",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 1, Title: "title",
 			},
-			wantCode: http.StatusUnprocessableEntity,
+			expected: notificationExpected{errorCode: http.StatusUnprocessableEntity},
 		},
 		{
 			name: "validates required user ID before dependencies",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), Title: "title", Body: "body",
 			},
-			wantCode: http.StatusUnprocessableEntity,
+			expected: notificationExpected{errorCode: http.StatusUnprocessableEntity},
 		},
 		{
 			name: "propagates user token lookup failure",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 4, Title: "title", Body: "body",
 			},
-			setup: func(f *notificationFixture) {
+			mock: func(_ *testing.T, f *notificationFixture) {
 				f.userMock.GetUserFcmTokenFunc = func(context.Context, *userSvc.GetUserFcmTokenIn) *userSvc.GetUserFcmTokenOut {
 					return &userSvc.GetUserFcmTokenOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusNotFound, ErrorMessage: "user not found"}}
 				}
 			},
-			wantCode:      http.StatusNotFound,
-			wantUserCalls: 1,
+			expected: notificationExpected{errorCode: http.StatusNotFound, userCalls: 1},
 		},
 		{
 			name: "succeeds when user has no tokens",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 4, Title: "title", Body: "body",
 			},
-			setup: func(f *notificationFixture) {
+			mock: func(_ *testing.T, f *notificationFixture) {
 				f.userMock.GetUserFcmTokenFunc = func(context.Context, *userSvc.GetUserFcmTokenIn) *userSvc.GetUserFcmTokenOut {
 					return &userSvc.GetUserFcmTokenOut{BaseOut: dto.BaseOut{Success: true}}
 				}
 			},
-			wantSuccess:   true,
-			wantUserCalls: 1,
+			expected: notificationExpected{success: true, userCalls: 1},
 		},
 		{
 			name: "sends to every token and treats transient send errors as best effort",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 4, Title: "title", Body: "body", Data: map[string]string{"kind": "notice"},
 			},
-			setup: func(f *notificationFixture) {
+			mock: func(t *testing.T, f *notificationFixture) {
 				f.userMock.GetUserFcmTokenFunc = func(context.Context, *userSvc.GetUserFcmTokenIn) *userSvc.GetUserFcmTokenOut {
 					return &userSvc.GetUserFcmTokenOut{
 						BaseOut: dto.BaseOut{Success: true},
@@ -105,61 +109,55 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 					return "message-id", nil
 				}
 			},
-			wantSuccess:   true,
-			wantUserCalls: 1,
-			wantSendCalls: 2,
+			expected: notificationExpected{success: true, userCalls: 1, sendCalls: 2},
 		},
 		{
 			name: "removes unregistered tokens",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 4, Title: "title", Body: "body",
 			},
-			setup: func(f *notificationFixture) {
+			mock: func(t *testing.T, f *notificationFixture) {
 				setupUnregisteredTokenRemoval(t, f, &userSvc.DeleteFcmTokenBulkOut{BaseOut: dto.BaseOut{Success: true}})
 			},
-			sender:          newFirebaseSDKTestSender,
-			wantSuccess:     true,
-			wantUserCalls:   1,
-			wantDeleteCalls: 1,
+			sender:   newFirebaseSDKTestSender,
+			expected: notificationExpected{success: true, userCalls: 1, deleteCalls: 1},
 		},
 		{
 			name: "propagates failure to remove unregistered tokens",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 4, Title: "title", Body: "body",
 			},
-			setup: func(f *notificationFixture) {
+			mock: func(t *testing.T, f *notificationFixture) {
 				setupUnregisteredTokenRemoval(t, f, &userSvc.DeleteFcmTokenBulkOut{
 					BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "cleanup unavailable"},
 				})
 			},
-			sender:          newFirebaseSDKTestSender,
-			wantCode:        http.StatusServiceUnavailable,
-			wantUserCalls:   1,
-			wantDeleteCalls: 1,
+			sender:   newFirebaseSDKTestSender,
+			expected: notificationExpected{errorCode: http.StatusServiceUnavailable, userCalls: 1, deleteCalls: 1},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newNotificationFixture(t)
-			if tt.setup != nil {
-				tt.setup(f)
+			if tt.mock != nil {
+				tt.mock(t, f)
 			}
 			if tt.sender != nil {
 				f.service = notificationSvc.NewNotificationService(tt.sender(t), f.userMock)
 			}
 			got := f.service.SendPushNotification(context.Background(), tt.input)
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("SendPushNotification() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
+			if got.Success != tt.expected.success || got.ErrorCode != tt.expected.errorCode {
+				t.Fatalf("SendPushNotification() = %+v, want success %t and code %d", got, tt.expected.success, tt.expected.errorCode)
 			}
-			if calls := len(f.userMock.GetUserFcmTokenCalls()); calls != tt.wantUserCalls {
-				t.Fatalf("GetUserFcmToken calls = %d, want %d", calls, tt.wantUserCalls)
+			if calls := len(f.userMock.GetUserFcmTokenCalls()); calls != tt.expected.userCalls {
+				t.Fatalf("GetUserFcmToken calls = %d, want %d", calls, tt.expected.userCalls)
 			}
-			if calls := len(f.firebaseMock.SendCalls()); calls != tt.wantSendCalls {
-				t.Fatalf("Firebase Send calls = %d, want %d", calls, tt.wantSendCalls)
+			if calls := len(f.firebaseMock.SendCalls()); calls != tt.expected.sendCalls {
+				t.Fatalf("Firebase Send calls = %d, want %d", calls, tt.expected.sendCalls)
 			}
-			if calls := len(f.userMock.DeleteFcmTokenBulkCalls()); calls != tt.wantDeleteCalls {
-				t.Fatalf("DeleteFcmTokenBulk calls = %d, want %d", calls, tt.wantDeleteCalls)
+			if calls := len(f.userMock.DeleteFcmTokenBulkCalls()); calls != tt.expected.deleteCalls {
+				t.Fatalf("DeleteFcmTokenBulk calls = %d, want %d", calls, tt.expected.deleteCalls)
 			}
 		})
 	}

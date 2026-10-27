@@ -6,15 +6,17 @@ import (
 	healthSvc "template-go/modules/health/svc"
 )
 
+type healthCheckTestCase struct {
+	name        string
+	input       *healthSvc.TestHealthIn
+	wantSuccess bool
+	wantCaller  string
+}
+
 func TestHealthCheckService_TestHealth(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name        string
-		input       *healthSvc.TestHealthIn
-		wantSuccess bool
-		wantCaller  string
-	}{
+	tests := []healthCheckTestCase{
 		{
 			name:        "returns healthy service status",
 			input:       &healthSvc.TestHealthIn{Trace: testTrace()},

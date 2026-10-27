@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -19,13 +21,17 @@ import (
 func newTestDatabase(t *testing.T) (*gorm.DB, config.Config) {
 	t.Helper()
 
+	timezone := os.Getenv("DB_TIMEZONE")
+	if timezone == "" {
+		timezone = "UTC"
+	}
 	cfg := config.Config{
 		DbUser:         "zekke_test",
 		DbPassword:     "zekke_test",
 		DbHost:         postgresHost,
 		DbPort:         postgresPort,
 		DbDriver:       "postgres",
-		DbTimezone:     "UTC",
+		DbTimezone:     timezone,
 		DbMaxOpenConns: 2,
 		DbMaxIdleConns: 1,
 	}
@@ -91,7 +97,7 @@ func postgresDSN(cfg config.Config, database string) string {
 	}
 	query := connectionURL.Query()
 	query.Set("sslmode", "disable")
-	query.Set("TimeZone", "UTC")
-	connectionURL.RawQuery = query.Encode()
+	query.Set("TimeZone", cfg.DbTimezone)
+	connectionURL.RawQuery = strings.ReplaceAll(query.Encode(), "%2F", "/")
 	return connectionURL.String()
 }
