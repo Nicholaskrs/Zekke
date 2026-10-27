@@ -13,16 +13,86 @@ import (
 	userSvc "template-go/modules/user/svc"
 )
 
+type userAdminServiceLoginUserAdminExpected struct {
+	success bool
+	code    int
+	tokens  int64
+}
+
+type userAdminServiceLoginUserAdminTestCase struct {
+	name     string
+	setup    func(t *testing.T, f *userAdminFixture) *userSvc.LoginUserAdminIn
+	expected userAdminServiceLoginUserAdminExpected
+}
+
+type userAdminServiceFilterUserExpected struct {
+	success   bool
+	code      int
+	users     int
+	totalRows int
+}
+
+type userAdminServiceFilterUserTestCase struct {
+	name     string
+	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminFilterUserIn
+	expected userAdminServiceFilterUserExpected
+}
+
+type userAdminServiceDeleteUserExpected struct {
+	success       bool
+	code          int
+	activeUsers   int64
+	privilegeCall int
+}
+
+type userAdminServiceDeleteUserTestCase struct {
+	name     string
+	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminDeleteUserIn
+	expected userAdminServiceDeleteUserExpected
+}
+
+type userAdminServiceRefreshExpected struct {
+	success bool
+	code    int
+	tokens  int64
+}
+
+type userAdminServiceRefreshTestCase struct {
+	name     string
+	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminRefreshIn
+	expected userAdminServiceRefreshExpected
+}
+
+type userAdminServiceChangeAdminPasswordExpected struct {
+	success        bool
+	code           int
+	storedPassword string
+}
+
+type userAdminServiceChangeAdminPasswordTestCase struct {
+	name     string
+	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminChangePasswordIn
+	expected userAdminServiceChangeAdminPasswordExpected
+}
+
+type userAdminServiceRegisterNewAdminExpected struct {
+	success        bool
+	code           int
+	users          int64
+	assignCalls    int
+	privilegeCalls int
+}
+
+type userAdminServiceRegisterNewAdminTestCase struct {
+	name     string
+	setup    func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn
+	expected userAdminServiceRegisterNewAdminExpected
+}
+
 func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name        string
-		setup       func(t *testing.T, f *userAdminFixture) *userSvc.LoginUserAdminIn
-		wantSuccess bool
-		wantCode    int
-		wantTokens  int64
-	}{
+	tests := []userAdminServiceLoginUserAdminTestCase{
 		{
 			name: "issues tokens for valid administrator credentials",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.LoginUserAdminIn {
@@ -34,8 +104,7 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 				}
 				return &userSvc.LoginUserAdminIn{Trace: testTrace(), Username: "admin", Password: "correct"}
 			},
-			wantSuccess: true,
-			wantTokens:  1,
+			expected: userAdminServiceLoginUserAdminExpected{success: true, tokens: 1},
 		},
 		{
 			name: "rejects non-administrator account",
@@ -43,7 +112,7 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 				seedUser(t, f.db, withUsername("regular"), withRole("User"), withPasswordHash(hashPassword(t, "correct")))
 				return &userSvc.LoginUserAdminIn{Trace: testTrace(), Username: "regular", Password: "correct"}
 			},
-			wantCode: http.StatusUnauthorized,
+			expected: userAdminServiceLoginUserAdminExpected{code: http.StatusUnauthorized},
 		},
 		{
 			name: "returns permission service failure",
@@ -54,7 +123,7 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 				}
 				return &userSvc.LoginUserAdminIn{Trace: testTrace(), Username: "admin", Password: "correct"}
 			},
-			wantCode: http.StatusServiceUnavailable,
+			expected: userAdminServiceLoginUserAdminExpected{code: http.StatusServiceUnavailable},
 		},
 	}
 
@@ -62,16 +131,16 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserAdminFixture(t)
 			got := f.service.LoginUserAdmin(context.Background(), tt.setup(t, f))
-			assertEqual(t, "LoginUserAdmin() success", tt.wantSuccess, got.Success)
-			assertEqual(t, "LoginUserAdmin() error code", tt.wantCode, got.ErrorCode)
+			assertEqual(t, "LoginUserAdmin() success", tt.expected.success, got.Success)
+			assertEqual(t, "LoginUserAdmin() error code", tt.expected.code, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.RefreshToken{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
 			}
-			if count != tt.wantTokens {
-				t.Fatalf("persisted refresh token count = %d, want %d", count, tt.wantTokens)
+			if count != tt.expected.tokens {
+				t.Fatalf("persisted refresh token count = %d, want %d", count, tt.expected.tokens)
 			}
-			if tt.wantSuccess && (got.Token == "" || got.RefreshToken == "") {
+			if tt.expected.success && (got.Token == "" || got.RefreshToken == "") {
 				t.Fatal("LoginUserAdmin() returned empty token")
 			}
 		})
@@ -81,14 +150,7 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 func TestUserAdminService_FilterUser(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name          string
-		setup         func(t *testing.T, f *userAdminFixture) *userSvc.AdminFilterUserIn
-		wantSuccess   bool
-		wantCode      int
-		wantUsers     int
-		wantTotalRows int
-	}{
+	tests := []userAdminServiceFilterUserTestCase{
 		{
 			name: "returns active users and count",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminFilterUserIn {
@@ -106,9 +168,7 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 					AdminUserId: 1, AdminPrivilegeGroup: "Root",
 				}
 			},
-			wantSuccess:   true,
-			wantUsers:     1,
-			wantTotalRows: 1,
+			expected: userAdminServiceFilterUserExpected{success: true, users: 1, totalRows: 1},
 		},
 		{
 			name: "rejects denied permission",
@@ -121,7 +181,7 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 					AdminUserId: 1, AdminPrivilegeGroup: "Root",
 				}
 			},
-			wantCode: http.StatusForbidden,
+			expected: userAdminServiceFilterUserExpected{code: http.StatusForbidden},
 		},
 		{
 			name: "propagates permission service error",
@@ -134,7 +194,7 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 					AdminUserId: 1, AdminPrivilegeGroup: "Root",
 				}
 			},
-			wantCode: http.StatusServiceUnavailable,
+			expected: userAdminServiceFilterUserExpected{code: http.StatusServiceUnavailable},
 		},
 	}
 
@@ -142,10 +202,10 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserAdminFixture(t)
 			got := f.service.FilterUser(context.Background(), tt.setup(t, f))
-			assertEqual(t, "FilterUser() success", tt.wantSuccess, got.Success)
-			assertEqual(t, "FilterUser() error code", tt.wantCode, got.ErrorCode)
-			assertEqual(t, "FilterUser() user count", tt.wantUsers, len(got.Users))
-			assertEqual(t, "FilterUser() total rows", tt.wantTotalRows, got.TotalRows)
+			assertEqual(t, "FilterUser() success", tt.expected.success, got.Success)
+			assertEqual(t, "FilterUser() error code", tt.expected.code, got.ErrorCode)
+			assertEqual(t, "FilterUser() user count", tt.expected.users, len(got.Users))
+			assertEqual(t, "FilterUser() total rows", tt.expected.totalRows, got.TotalRows)
 			if calls := f.permissionMock.HasPrivilegeCalls(); len(calls) != 1 {
 				t.Fatalf("HasPrivilege calls = %d, want 1", len(calls))
 			}
@@ -156,14 +216,7 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 func TestUserAdminService_DeleteUser(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name              string
-		setup             func(t *testing.T, f *userAdminFixture) *userSvc.AdminDeleteUserIn
-		wantSuccess       bool
-		wantCode          int
-		wantActiveUsers   int64
-		wantPrivilegeCall int
-	}{
+	tests := []userAdminServiceDeleteUserTestCase{
 		{
 			name: "soft-deletes target user when authorized",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminDeleteUserIn {
@@ -174,8 +227,7 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 				}
 				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: int(user.ID)}
 			},
-			wantSuccess:       true,
-			wantPrivilegeCall: 1,
+			expected: userAdminServiceDeleteUserExpected{success: true, privilegeCall: 1},
 		},
 		{
 			name: "does not modify users when denied",
@@ -186,9 +238,7 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 				}
 				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: int(user.ID)}
 			},
-			wantCode:          http.StatusForbidden,
-			wantActiveUsers:   1,
-			wantPrivilegeCall: 1,
+			expected: userAdminServiceDeleteUserExpected{code: http.StatusForbidden, activeUsers: 1, privilegeCall: 1},
 		},
 		{
 			name: "propagates permission dependency failure",
@@ -199,9 +249,7 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 				}
 				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: int(user.ID)}
 			},
-			wantCode:          http.StatusServiceUnavailable,
-			wantActiveUsers:   1,
-			wantPrivilegeCall: 1,
+			expected: userAdminServiceDeleteUserExpected{code: http.StatusServiceUnavailable, activeUsers: 1, privilegeCall: 1},
 		},
 		{
 			name: "returns not found for missing target",
@@ -211,15 +259,14 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 				}
 				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: 42}
 			},
-			wantCode:          http.StatusNotFound,
-			wantPrivilegeCall: 1,
+			expected: userAdminServiceDeleteUserExpected{code: http.StatusNotFound, privilegeCall: 1},
 		},
 		{
 			name: "rejects zero target ID without checking permission",
 			setup: func(t *testing.T, _ *userAdminFixture) *userSvc.AdminDeleteUserIn {
 				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root"}
 			},
-			wantCode: http.StatusBadRequest,
+			expected: userAdminServiceDeleteUserExpected{code: http.StatusBadRequest},
 		},
 	}
 
@@ -227,16 +274,16 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserAdminFixture(t)
 			got := f.service.DeleteUser(context.Background(), tt.setup(t, f))
-			assertEqual(t, "DeleteUser() success", tt.wantSuccess, got.Success)
-			assertEqual(t, "DeleteUser() error code", tt.wantCode, got.ErrorCode)
+			assertEqual(t, "DeleteUser() success", tt.expected.success, got.Success)
+			assertEqual(t, "DeleteUser() error code", tt.expected.code, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.User{}).Where("deleted_at IS NULL").Count(&count).Error; err != nil {
 				t.Fatal(err)
 			}
-			if count != tt.wantActiveUsers {
-				t.Fatalf("active user count = %d, want %d", count, tt.wantActiveUsers)
+			if count != tt.expected.activeUsers {
+				t.Fatalf("active user count = %d, want %d", count, tt.expected.activeUsers)
 			}
-			if tt.wantSuccess {
+			if tt.expected.success {
 				var token model.RefreshToken
 				if err := f.db.Where("token_hash = ?", helpers.HashToken("active-user-token")).First(&token).Error; err != nil {
 					t.Fatal(err)
@@ -245,8 +292,8 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 					t.Fatal("refresh token was not revoked with deleted user")
 				}
 			}
-			if calls := f.permissionMock.HasPrivilegeCalls(); len(calls) != tt.wantPrivilegeCall {
-				t.Fatalf("HasPrivilege calls = %d, want %d", len(calls), tt.wantPrivilegeCall)
+			if calls := f.permissionMock.HasPrivilegeCalls(); len(calls) != tt.expected.privilegeCall {
+				t.Fatalf("HasPrivilege calls = %d, want %d", len(calls), tt.expected.privilegeCall)
 			}
 		})
 	}
@@ -255,13 +302,7 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 func TestUserAdminService_Refresh(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name        string
-		setup       func(t *testing.T, f *userAdminFixture) *userSvc.AdminRefreshIn
-		wantSuccess bool
-		wantCode    int
-		wantTokens  int64
-	}{
+	tests := []userAdminServiceRefreshTestCase{
 		{
 			name: "rotates administrator refresh token",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminRefreshIn {
@@ -270,8 +311,7 @@ func TestUserAdminService_Refresh(t *testing.T) {
 				seedRefreshToken(t, f.db, user.ID, "old-admin-token", "admin-family", time.Now().Add(time.Hour), nil)
 				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "old-admin-token"}
 			},
-			wantSuccess: true,
-			wantTokens:  2,
+			expected: userAdminServiceRefreshExpected{success: true, tokens: 2},
 		},
 		{
 			name: "returns not found for unknown token",
@@ -279,7 +319,7 @@ func TestUserAdminService_Refresh(t *testing.T) {
 				user := seedUser(t, f.db, withRole("Admin"))
 				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "missing"}
 			},
-			wantCode: http.StatusNotFound,
+			expected: userAdminServiceRefreshExpected{code: http.StatusNotFound},
 		},
 		{
 			name: "rejects expired token",
@@ -288,8 +328,7 @@ func TestUserAdminService_Refresh(t *testing.T) {
 				seedRefreshToken(t, f.db, user.ID, "expired-admin", "admin-family", time.Now().Add(-time.Hour), nil)
 				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "expired-admin"}
 			},
-			wantCode:   http.StatusForbidden,
-			wantTokens: 1,
+			expected: userAdminServiceRefreshExpected{code: http.StatusForbidden, tokens: 1},
 		},
 		{
 			name: "revokes family when used token is reused",
@@ -300,8 +339,7 @@ func TestUserAdminService_Refresh(t *testing.T) {
 				seedRefreshToken(t, f.db, user.ID, "sibling-admin", "admin-family", time.Now().Add(time.Hour), nil)
 				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "used-admin"}
 			},
-			wantCode:   http.StatusForbidden,
-			wantTokens: 2,
+			expected: userAdminServiceRefreshExpected{code: http.StatusForbidden, tokens: 2},
 		},
 	}
 
@@ -309,14 +347,14 @@ func TestUserAdminService_Refresh(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserAdminFixture(t)
 			got := f.service.Refresh(context.Background(), tt.setup(t, f))
-			assertEqual(t, "Refresh() success", tt.wantSuccess, got.Success)
-			assertEqual(t, "Refresh() error code", tt.wantCode, got.ErrorCode)
+			assertEqual(t, "Refresh() success", tt.expected.success, got.Success)
+			assertEqual(t, "Refresh() error code", tt.expected.code, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.RefreshToken{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
 			}
-			if count != tt.wantTokens {
-				t.Fatalf("refresh token count = %d, want %d", count, tt.wantTokens)
+			if count != tt.expected.tokens {
+				t.Fatalf("refresh token count = %d, want %d", count, tt.expected.tokens)
 			}
 			if tt.name == "revokes family when used token is reused" {
 				var revoked int64
@@ -334,13 +372,7 @@ func TestUserAdminService_Refresh(t *testing.T) {
 func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name               string
-		setup              func(t *testing.T, f *userAdminFixture) *userSvc.AdminChangePasswordIn
-		wantSuccess        bool
-		wantCode           int
-		wantStoredPassword string
-	}{
+	tests := []userAdminServiceChangeAdminPasswordTestCase{
 		{
 			name: "updates password and issues a new refresh token",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminChangePasswordIn {
@@ -353,8 +385,7 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 					Trace: testTrace(), UserAdminId: int(user.ID), OldPassword: "old-password", NewPassword: "new-password",
 				}
 			},
-			wantSuccess:        true,
-			wantStoredPassword: "new-password",
+			expected: userAdminServiceChangeAdminPasswordExpected{success: true, storedPassword: "new-password"},
 		},
 		{
 			name: "rejects incorrect old password without changing data",
@@ -364,8 +395,7 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 					Trace: testTrace(), UserAdminId: int(user.ID), OldPassword: "wrong", NewPassword: "new-password",
 				}
 			},
-			wantCode:           http.StatusBadRequest,
-			wantStoredPassword: "old-password",
+			expected: userAdminServiceChangeAdminPasswordExpected{code: http.StatusBadRequest, storedPassword: "old-password"},
 		},
 		{
 			name: "rolls back password update if permission lookup fails",
@@ -378,15 +408,14 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 					Trace: testTrace(), UserAdminId: int(user.ID), OldPassword: "old-password", NewPassword: "new-password",
 				}
 			},
-			wantCode:           http.StatusServiceUnavailable,
-			wantStoredPassword: "old-password",
+			expected: userAdminServiceChangeAdminPasswordExpected{code: http.StatusServiceUnavailable, storedPassword: "old-password"},
 		},
 		{
 			name: "validates required ID",
 			setup: func(t *testing.T, _ *userAdminFixture) *userSvc.AdminChangePasswordIn {
 				return &userSvc.AdminChangePasswordIn{Trace: testTrace(), OldPassword: "old", NewPassword: "new"}
 			},
-			wantCode: http.StatusBadRequest,
+			expected: userAdminServiceChangeAdminPasswordExpected{code: http.StatusBadRequest},
 		},
 	}
 
@@ -395,18 +424,18 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 			f := newUserAdminFixture(t)
 			input := tt.setup(t, f)
 			got := f.service.ChangeAdminPassword(context.Background(), input)
-			assertEqual(t, "ChangeAdminPassword() success", tt.wantSuccess, got.Success)
-			assertEqual(t, "ChangeAdminPassword() error code", tt.wantCode, got.ErrorCode)
+			assertEqual(t, "ChangeAdminPassword() success", tt.expected.success, got.Success)
+			assertEqual(t, "ChangeAdminPassword() error code", tt.expected.code, got.ErrorCode)
 			var user model.User
 			err := f.db.First(&user, input.UserAdminId).Error
-			if err == nil && tt.wantStoredPassword != "" && !helpers.VerifyPassword(tt.wantStoredPassword, user.Password) {
-				t.Fatalf("stored password does not verify against expected password %q", tt.wantStoredPassword)
+			if err == nil && tt.expected.storedPassword != "" && !helpers.VerifyPassword(tt.expected.storedPassword, user.Password) {
+				t.Fatalf("stored password does not verify against expected password %q", tt.expected.storedPassword)
 			}
 			var refreshTokens []model.RefreshToken
 			if err := f.db.Order("id").Find(&refreshTokens).Error; err != nil {
 				t.Fatal(err)
 			}
-			if tt.wantSuccess {
+			if tt.expected.success {
 				if len(refreshTokens) != 2 || refreshTokens[0].RevokedAt == nil || got.RefreshToken == "" {
 					t.Fatalf("refresh token state = %+v; expected old token revoked and replacement issued", refreshTokens)
 				}
@@ -420,15 +449,7 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name               string
-		setup              func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn
-		wantSuccess        bool
-		wantCode           int
-		wantUsers          int64
-		wantAssignCalls    int
-		wantPrivilegeCalls int
-	}{
+	tests := []userAdminServiceRegisterNewAdminTestCase{
 		{
 			name: "registers admin and assigns requested group",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn {
@@ -447,10 +468,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 					FullName: "New Admin", PrivilegeGroup: "Auditor",
 				}
 			},
-			wantSuccess:        true,
-			wantUsers:          1,
-			wantAssignCalls:    1,
-			wantPrivilegeCalls: 1,
+			expected: userAdminServiceRegisterNewAdminExpected{success: true, users: 1, assignCalls: 1, privilegeCalls: 1},
 		},
 		{
 			name: "rejects a privilege group that does not exist",
@@ -463,7 +481,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 					Username: "new-admin", Email: "new-admin@example.test", Password: "password", PrivilegeGroup: "Missing",
 				}
 			},
-			wantCode: http.StatusBadRequest,
+			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusBadRequest},
 		},
 		{
 			name: "rejects caller without registration privilege",
@@ -476,8 +494,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 				}
 				return &userSvc.RegisterNewAdminIn{Trace: testTrace(), UserAdminId: 1, AdminPrivilegeGroup: "Root", PrivilegeGroup: "Auditor"}
 			},
-			wantCode:           http.StatusForbidden,
-			wantPrivilegeCalls: 1,
+			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusForbidden, privilegeCalls: 1},
 		},
 		{
 			name: "rolls back created user if group assignment fails",
@@ -496,9 +513,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 					Username: "new-admin", Email: "new-admin@example.test", Password: "password", PrivilegeGroup: "Auditor",
 				}
 			},
-			wantCode:           http.StatusConflict,
-			wantAssignCalls:    1,
-			wantPrivilegeCalls: 1,
+			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusConflict, assignCalls: 1, privilegeCalls: 1},
 		},
 		{
 			name: "rejects duplicate username",
@@ -515,9 +530,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 					Username: "taken", Email: "new-admin@example.test", Password: "password", PrivilegeGroup: "Auditor",
 				}
 			},
-			wantCode:           http.StatusBadRequest,
-			wantUsers:          1,
-			wantPrivilegeCalls: 1,
+			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusBadRequest, users: 1, privilegeCalls: 1},
 		},
 	}
 
@@ -525,20 +538,20 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserAdminFixture(t)
 			got := f.service.RegisterNewAdmin(context.Background(), tt.setup(t, f))
-			assertEqual(t, "RegisterNewAdmin() success", tt.wantSuccess, got.Success)
-			assertEqual(t, "RegisterNewAdmin() error code", tt.wantCode, got.ErrorCode)
+			assertEqual(t, "RegisterNewAdmin() success", tt.expected.success, got.Success)
+			assertEqual(t, "RegisterNewAdmin() error code", tt.expected.code, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.User{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
 			}
-			if count != tt.wantUsers {
-				t.Fatalf("persisted user count = %d, want %d", count, tt.wantUsers)
+			if count != tt.expected.users {
+				t.Fatalf("persisted user count = %d, want %d", count, tt.expected.users)
 			}
-			if calls := f.permissionMock.ChangeAdminPrivilegeRoleCalls(); len(calls) != tt.wantAssignCalls {
-				t.Fatalf("ChangeAdminPrivilegeRole calls = %d, want %d", len(calls), tt.wantAssignCalls)
+			if calls := f.permissionMock.ChangeAdminPrivilegeRoleCalls(); len(calls) != tt.expected.assignCalls {
+				t.Fatalf("ChangeAdminPrivilegeRole calls = %d, want %d", len(calls), tt.expected.assignCalls)
 			}
-			if calls := f.permissionMock.HasPrivilegeCalls(); len(calls) != tt.wantPrivilegeCalls {
-				t.Fatalf("HasPrivilege calls = %d, want %d", len(calls), tt.wantPrivilegeCalls)
+			if calls := f.permissionMock.HasPrivilegeCalls(); len(calls) != tt.expected.privilegeCalls {
+				t.Fatalf("HasPrivilege calls = %d, want %d", len(calls), tt.expected.privilegeCalls)
 			}
 		})
 	}
