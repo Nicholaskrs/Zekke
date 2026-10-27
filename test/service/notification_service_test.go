@@ -27,11 +27,14 @@ type notificationExpected struct {
 }
 
 type notificationTestCase struct {
-	name     string
-	input    *notificationSvc.SendPushNotificationIn
-	expected notificationExpected
-	mock     func(t *testing.T, f *notificationFixture)
-	sender   func(t *testing.T) firebase.Sender
+	name                     string
+	input                    *notificationSvc.SendPushNotificationIn
+	expected                 notificationExpected
+	GetUserFcmTokenMock      *userSvc.GetUserFcmTokenOut
+	DeleteFcmTokenBulkMock   *userSvc.DeleteFcmTokenBulkOut
+	deleteFcmTokenMockTokens []string
+	sendMock                 func(*testing.T, context.Context, string, string, map[string]string, string) (string, error)
+	sender                   func(t *testing.T) firebase.Sender
 }
 
 func TestNotificationService_SendPushNotification(t *testing.T) {
@@ -64,10 +67,8 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 4, Title: "title", Body: "body",
 			},
-			mock: func(_ *testing.T, f *notificationFixture) {
-				f.userMock.GetUserFcmTokenFunc = func(context.Context, *userSvc.GetUserFcmTokenIn) *userSvc.GetUserFcmTokenOut {
-					return &userSvc.GetUserFcmTokenOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusNotFound, ErrorMessage: "user not found"}}
-				}
+			GetUserFcmTokenMock: &userSvc.GetUserFcmTokenOut{
+				BaseOut: dto.BaseOut{ErrorCode: http.StatusNotFound, ErrorMessage: "user not found"},
 			},
 			expected: notificationExpected{errorCode: http.StatusNotFound, userCalls: 1},
 		},
@@ -76,10 +77,8 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 4, Title: "title", Body: "body",
 			},
-			mock: func(_ *testing.T, f *notificationFixture) {
-				f.userMock.GetUserFcmTokenFunc = func(context.Context, *userSvc.GetUserFcmTokenIn) *userSvc.GetUserFcmTokenOut {
-					return &userSvc.GetUserFcmTokenOut{BaseOut: dto.BaseOut{Success: true}}
-				}
+			GetUserFcmTokenMock: &userSvc.GetUserFcmTokenOut{
+				BaseOut: dto.BaseOut{Success: true},
 			},
 			expected: notificationExpected{success: true, userCalls: 1},
 		},
@@ -88,26 +87,21 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 4, Title: "title", Body: "body", Data: map[string]string{"kind": "notice"},
 			},
-			mock: func(t *testing.T, f *notificationFixture) {
-				f.userMock.GetUserFcmTokenFunc = func(context.Context, *userSvc.GetUserFcmTokenIn) *userSvc.GetUserFcmTokenOut {
-					return &userSvc.GetUserFcmTokenOut{
-						BaseOut: dto.BaseOut{Success: true},
-						FcmTokens: []*model.FcmToken{
-							{FcmToken: "token-1"},
-							{FcmToken: "token-2"},
-						},
-					}
+			GetUserFcmTokenMock: &userSvc.GetUserFcmTokenOut{
+				BaseOut: dto.BaseOut{Success: true},
+				FcmTokens: []*model.FcmToken{
+					{FcmToken: "token-1"},
+					{FcmToken: "token-2"},
+				},
+			},
+			sendMock: func(t *testing.T, _ context.Context, title, body string, data map[string]string, token string) (string, error) {
+				if title != "title" || body != "body" || data["kind"] != "notice" {
+					t.Errorf("Send() got title=%q body=%q data=%v", title, body, data)
 				}
-
-				f.firebaseMock.SendFunc = func(_ context.Context, title, body string, data map[string]string, token string) (string, error) {
-					if title != "title" || body != "body" || data["kind"] != "notice" {
-						t.Errorf("Send() got title=%q body=%q data=%v", title, body, data)
-					}
-					if token == "token-1" {
-						return "", errors.New("temporary send error")
-					}
-					return "message-id", nil
+				if token == "token-1" {
+					return "", errors.New("temporary send error")
 				}
+				return "message-id", nil
 			},
 			expected: notificationExpected{success: true, userCalls: 1, sendCalls: 2},
 		},
@@ -116,32 +110,56 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 4, Title: "title", Body: "body",
 			},
-			mock: func(t *testing.T, f *notificationFixture) {
-				setupUnregisteredTokenRemoval(t, f, &userSvc.DeleteFcmTokenBulkOut{BaseOut: dto.BaseOut{Success: true}})
+			GetUserFcmTokenMock: &userSvc.GetUserFcmTokenOut{
+				BaseOut:   dto.BaseOut{Success: true},
+				FcmTokens: []*model.FcmToken{{FcmToken: "unregistered-token"}},
 			},
-			sender:   newFirebaseSDKTestSender,
-			expected: notificationExpected{success: true, userCalls: 1, deleteCalls: 1},
+			DeleteFcmTokenBulkMock:   &userSvc.DeleteFcmTokenBulkOut{BaseOut: dto.BaseOut{Success: true}},
+			deleteFcmTokenMockTokens: []string{"unregistered-token"},
+			sender:                   newFirebaseSDKTestSender,
+			expected:                 notificationExpected{success: true, userCalls: 1, deleteCalls: 1},
 		},
 		{
 			name: "propagates failure to remove unregistered tokens",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 4, Title: "title", Body: "body",
 			},
-			mock: func(t *testing.T, f *notificationFixture) {
-				setupUnregisteredTokenRemoval(t, f, &userSvc.DeleteFcmTokenBulkOut{
-					BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "cleanup unavailable"},
-				})
+			GetUserFcmTokenMock: &userSvc.GetUserFcmTokenOut{
+				BaseOut:   dto.BaseOut{Success: true},
+				FcmTokens: []*model.FcmToken{{FcmToken: "unregistered-token"}},
 			},
-			sender:   newFirebaseSDKTestSender,
-			expected: notificationExpected{errorCode: http.StatusServiceUnavailable, userCalls: 1, deleteCalls: 1},
+			DeleteFcmTokenBulkMock: &userSvc.DeleteFcmTokenBulkOut{
+				BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "cleanup unavailable"},
+			},
+			deleteFcmTokenMockTokens: []string{"unregistered-token"},
+			sender:                   newFirebaseSDKTestSender,
+			expected:                 notificationExpected{errorCode: http.StatusServiceUnavailable, userCalls: 1, deleteCalls: 1},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newNotificationFixture(t)
-			if tt.mock != nil {
-				tt.mock(t, f)
+			f.userMock.GetUserFcmTokenFunc = func(context.Context, *userSvc.GetUserFcmTokenIn) *userSvc.GetUserFcmTokenOut {
+				return tt.GetUserFcmTokenMock
+			}
+			f.userMock.DeleteFcmTokenBulkFunc = func(_ context.Context, in *userSvc.DeleteFcmTokenBulkIn) *userSvc.DeleteFcmTokenBulkOut {
+				if len(in.Tokens) != len(tt.deleteFcmTokenMockTokens) {
+					t.Errorf("DeleteFcmTokenBulk() tokens = %v, want %v", in.Tokens, tt.deleteFcmTokenMockTokens)
+				} else {
+					for i, token := range in.Tokens {
+						if token != tt.deleteFcmTokenMockTokens[i] {
+							t.Errorf("DeleteFcmTokenBulk() tokens = %v, want %v", in.Tokens, tt.deleteFcmTokenMockTokens)
+							break
+						}
+					}
+				}
+				return tt.DeleteFcmTokenBulkMock
+			}
+			if tt.sendMock != nil {
+				f.firebaseMock.SendFunc = func(ctx context.Context, title, body string, data map[string]string, token string) (string, error) {
+					return tt.sendMock(t, ctx, title, body, data, token)
+				}
 			}
 			if tt.sender != nil {
 				f.service = notificationSvc.NewNotificationService(tt.sender(t), f.userMock)
@@ -160,22 +178,6 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 				t.Fatalf("DeleteFcmTokenBulk calls = %d, want %d", calls, tt.expected.deleteCalls)
 			}
 		})
-	}
-}
-
-func setupUnregisteredTokenRemoval(t *testing.T, f *notificationFixture, deleteResponse *userSvc.DeleteFcmTokenBulkOut) {
-	t.Helper()
-	f.userMock.GetUserFcmTokenFunc = func(context.Context, *userSvc.GetUserFcmTokenIn) *userSvc.GetUserFcmTokenOut {
-		return &userSvc.GetUserFcmTokenOut{
-			BaseOut:   dto.BaseOut{Success: true},
-			FcmTokens: []*model.FcmToken{{FcmToken: "unregistered-token"}},
-		}
-	}
-	f.userMock.DeleteFcmTokenBulkFunc = func(_ context.Context, in *userSvc.DeleteFcmTokenBulkIn) *userSvc.DeleteFcmTokenBulkOut {
-		if len(in.Tokens) != 1 || in.Tokens[0] != "unregistered-token" {
-			t.Errorf("DeleteFcmTokenBulk() tokens = %v, want [unregistered-token]", in.Tokens)
-		}
-		return deleteResponse
 	}
 }
 
