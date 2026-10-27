@@ -24,6 +24,19 @@ type notificationExpected struct {
 	userCalls   int
 	sendCalls   int
 	deleteCalls int
+	sendInputs  []notificationSendInput
+}
+
+type notificationSendInput struct {
+	title string
+	body  string
+	data  map[string]string
+	token string
+}
+
+type notificationSendResult struct {
+	messageID string
+	err       error
 }
 
 type notificationTestCase struct {
@@ -33,7 +46,7 @@ type notificationTestCase struct {
 	GetUserFcmTokenMock      *userSvc.GetUserFcmTokenOut
 	DeleteFcmTokenBulkMock   *userSvc.DeleteFcmTokenBulkOut
 	deleteFcmTokenMockTokens []string
-	sendMock                 func(*testing.T, context.Context, string, string, map[string]string, string) (string, error)
+	SendMock                 map[string]notificationSendResult
 	sender                   func(t *testing.T) firebase.Sender
 }
 
@@ -94,16 +107,17 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 					{FcmToken: "token-2"},
 				},
 			},
-			sendMock: func(t *testing.T, _ context.Context, title, body string, data map[string]string, token string) (string, error) {
-				if title != "title" || body != "body" || data["kind"] != "notice" {
-					t.Errorf("Send() got title=%q body=%q data=%v", title, body, data)
-				}
-				if token == "token-1" {
-					return "", errors.New("temporary send error")
-				}
-				return "message-id", nil
+			SendMock: map[string]notificationSendResult{
+				"token-1": {err: errors.New("temporary send error")},
+				"token-2": {messageID: "message-id"},
 			},
-			expected: notificationExpected{success: true, userCalls: 1, sendCalls: 2},
+			expected: notificationExpected{
+				success: true, userCalls: 1, sendCalls: 2,
+				sendInputs: []notificationSendInput{
+					{title: "title", body: "body", data: map[string]string{"kind": "notice"}, token: "token-1"},
+					{title: "title", body: "body", data: map[string]string{"kind": "notice"}, token: "token-2"},
+				},
+			},
 		},
 		{
 			name: "removes unregistered tokens",
@@ -117,7 +131,12 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 			DeleteFcmTokenBulkMock:   &userSvc.DeleteFcmTokenBulkOut{BaseOut: dto.BaseOut{Success: true}},
 			deleteFcmTokenMockTokens: []string{"unregistered-token"},
 			sender:                   newFirebaseSDKTestSender,
-			expected:                 notificationExpected{success: true, userCalls: 1, deleteCalls: 1},
+			expected: notificationExpected{
+				success: true, userCalls: 1, deleteCalls: 1,
+				sendInputs: []notificationSendInput{
+					{title: "title", body: "body", token: "unregistered-token"},
+				},
+			},
 		},
 		{
 			name: "propagates failure to remove unregistered tokens",
@@ -133,59 +152,68 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 			},
 			deleteFcmTokenMockTokens: []string{"unregistered-token"},
 			sender:                   newFirebaseSDKTestSender,
-			expected:                 notificationExpected{errorCode: http.StatusServiceUnavailable, userCalls: 1, deleteCalls: 1},
+			expected: notificationExpected{
+				errorCode: http.StatusServiceUnavailable, userCalls: 1, deleteCalls: 1,
+				sendInputs: []notificationSendInput{
+					{title: "title", body: "body", token: "unregistered-token"},
+				},
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newNotificationFixture(t)
+			var sdkSender *firebaseSDKTestSender
 			f.userMock.GetUserFcmTokenFunc = func(context.Context, *userSvc.GetUserFcmTokenIn) *userSvc.GetUserFcmTokenOut {
 				return tt.GetUserFcmTokenMock
 			}
 			f.userMock.DeleteFcmTokenBulkFunc = func(_ context.Context, in *userSvc.DeleteFcmTokenBulkIn) *userSvc.DeleteFcmTokenBulkOut {
-				if len(in.Tokens) != len(tt.deleteFcmTokenMockTokens) {
-					t.Errorf("DeleteFcmTokenBulk() tokens = %v, want %v", in.Tokens, tt.deleteFcmTokenMockTokens)
-				} else {
-					for i, token := range in.Tokens {
-						if token != tt.deleteFcmTokenMockTokens[i] {
-							t.Errorf("DeleteFcmTokenBulk() tokens = %v, want %v", in.Tokens, tt.deleteFcmTokenMockTokens)
-							break
-						}
-					}
-				}
+				assertEqual(t, "DeleteFcmTokenBulk() tokens", tt.deleteFcmTokenMockTokens, in.Tokens)
 				return tt.DeleteFcmTokenBulkMock
 			}
-			if tt.sendMock != nil {
+			if tt.SendMock != nil {
 				f.firebaseMock.SendFunc = func(ctx context.Context, title, body string, data map[string]string, token string) (string, error) {
-					return tt.sendMock(t, ctx, title, body, data, token)
+					result := tt.SendMock[token]
+					return result.messageID, result.err
 				}
 			}
 			if tt.sender != nil {
-				f.service = notificationSvc.NewNotificationService(tt.sender(t), f.userMock)
+				sender := tt.sender(t)
+				sdkSender, _ = sender.(*firebaseSDKTestSender)
+				f.service = notificationSvc.NewNotificationService(sender, f.userMock)
 			}
 			got := f.service.SendPushNotification(context.Background(), tt.input)
-			if got.Success != tt.expected.success || got.ErrorCode != tt.expected.errorCode {
-				t.Fatalf("SendPushNotification() = %+v, want success %t and code %d", got, tt.expected.success, tt.expected.errorCode)
+			assertEqual(t, "SendPushNotification() success", tt.expected.success, got.Success)
+			assertEqual(t, "SendPushNotification() error code", tt.expected.errorCode, got.ErrorCode)
+			assertEqual(t, "GetUserFcmToken calls", tt.expected.userCalls, len(f.userMock.GetUserFcmTokenCalls()))
+			sendCalls := f.firebaseMock.SendCalls()
+			assertEqual(t, "Firebase Send calls", tt.expected.sendCalls, len(sendCalls))
+			assertEqual(t, "DeleteFcmTokenBulk calls", tt.expected.deleteCalls, len(f.userMock.DeleteFcmTokenBulkCalls()))
+			var gotSendInputs []notificationSendInput
+			if sdkSender != nil {
+				gotSendInputs = sdkSender.calls
+			} else {
+				for _, call := range sendCalls {
+					gotSendInputs = append(gotSendInputs, notificationSendInput{
+						title: call.Title, body: call.Body, data: call.Data, token: call.Token,
+					})
+				}
 			}
-			if calls := len(f.userMock.GetUserFcmTokenCalls()); calls != tt.expected.userCalls {
-				t.Fatalf("GetUserFcmToken calls = %d, want %d", calls, tt.expected.userCalls)
-			}
-			if calls := len(f.firebaseMock.SendCalls()); calls != tt.expected.sendCalls {
-				t.Fatalf("Firebase Send calls = %d, want %d", calls, tt.expected.sendCalls)
-			}
-			if calls := len(f.userMock.DeleteFcmTokenBulkCalls()); calls != tt.expected.deleteCalls {
-				t.Fatalf("DeleteFcmTokenBulk calls = %d, want %d", calls, tt.expected.deleteCalls)
-			}
+			assertEqual(t, "Firebase Send inputs", tt.expected.sendInputs, gotSendInputs)
 		})
 	}
 }
 
 type firebaseSDKTestSender struct {
 	client *messaging.Client
+	calls  []notificationSendInput
 }
 
 func (sender *firebaseSDKTestSender) Send(ctx context.Context, title, body string, data map[string]string, token string) (string, error) {
+	sender.calls = append(sender.calls, notificationSendInput{
+		title: title, body: body, data: data, token: token,
+	})
 	return sender.client.Send(ctx, &messaging.Message{
 		Data:  data,
 		Token: token,

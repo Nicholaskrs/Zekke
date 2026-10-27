@@ -60,9 +60,8 @@ func TestPermissionAdminService_ChangeAdminPrivilegeRole(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newPermissionFixture(t)
 			got := f.service.ChangeAdminPrivilegeRole(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("ChangeAdminPrivilegeRole() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "ChangeAdminPrivilegeRole() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "ChangeAdminPrivilegeRole() error code", tt.wantCode, got.ErrorCode)
 			var mapping model.UserPrivilegeGroup
 			err := f.db.Where("user_id = ?", 7).First(&mapping).Error
 			if tt.wantSuccess {
@@ -124,9 +123,8 @@ func TestPermissionAdminService_InsertNewPrivilegeGroup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newPermissionFixture(t)
 			got := f.service.InsertNewPrivilegeGroup(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("InsertNewPrivilegeGroup() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "InsertNewPrivilegeGroup() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "InsertNewPrivilegeGroup() error code", tt.wantCode, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.PrivilegeGroup{}).Where("code = ?", "Operator").Count(&count).Error; err != nil {
 				t.Fatal(err)
@@ -189,9 +187,8 @@ func TestPermissionAdminService_AssignPrivilegeToGroup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newPermissionFixture(t)
 			got := f.service.AssignPrivilegeToGroup(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("AssignPrivilegeToGroup() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "AssignPrivilegeToGroup() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "AssignPrivilegeToGroup() error code", tt.wantCode, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.PrivilegeGroupPrivilege{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
@@ -243,9 +240,9 @@ func TestPermissionAdminService_HasPrivilege(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newPermissionFixture(t)
 			got := f.service.HasPrivilege(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.IsAllowed != tt.wantAllowed || got.ErrorCode != tt.wantCode {
-				t.Fatalf("HasPrivilege() = %+v, want success %t, allowed %t, and code %d", got, tt.wantSuccess, tt.wantAllowed, tt.wantCode)
-			}
+			assertEqual(t, "HasPrivilege() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "HasPrivilege() allowed", tt.wantAllowed, got.IsAllowed)
+			assertEqual(t, "HasPrivilege() error code", tt.wantCode, got.ErrorCode)
 		})
 	}
 }
@@ -289,9 +286,9 @@ func TestPermissionAdminService_GetAdminGroupPrivilege(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newPermissionFixture(t)
 			got := f.service.GetAdminGroupPrivilege(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode || got.AdminPrivilegeGroup != tt.wantGroup {
-				t.Fatalf("GetAdminGroupPrivilege() = %+v, want success %t, group %q, and code %d", got, tt.wantSuccess, tt.wantGroup, tt.wantCode)
-			}
+			assertEqual(t, "GetAdminGroupPrivilege() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "GetAdminGroupPrivilege() group", tt.wantGroup, got.AdminPrivilegeGroup)
+			assertEqual(t, "GetAdminGroupPrivilege() error code", tt.wantCode, got.ErrorCode)
 		})
 	}
 }
@@ -337,9 +334,9 @@ func TestPermissionAdminService_CheckAdminGroupPrivilegeExists(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newPermissionFixture(t)
 			got := f.service.CheckAdminGroupPrivilegeExists(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.IsExists != tt.wantExists || got.ErrorCode != tt.wantCode {
-				t.Fatalf("CheckAdminGroupPrivilegeExists() = %+v, want success %t, exists %t, and code %d", got, tt.wantSuccess, tt.wantExists, tt.wantCode)
-			}
+			assertEqual(t, "CheckAdminGroupPrivilegeExists() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "CheckAdminGroupPrivilegeExists() exists", tt.wantExists, got.IsExists)
+			assertEqual(t, "CheckAdminGroupPrivilegeExists() error code", tt.wantCode, got.ErrorCode)
 		})
 	}
 }
@@ -393,11 +390,10 @@ func TestPermissionAdminService_FilterPrivilegeGroup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newPermissionFixture(t)
 			got := f.service.FilterPrivilegeGroup(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode ||
-				len(got.List) != tt.wantGroups || got.TotalRows != tt.wantTotalRows {
-				t.Fatalf("FilterPrivilegeGroup() = %+v, want success %t, groups %d, total %d, and code %d",
-					got, tt.wantSuccess, tt.wantGroups, tt.wantTotalRows, tt.wantCode)
-			}
+			assertEqual(t, "FilterPrivilegeGroup() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "FilterPrivilegeGroup() error code", tt.wantCode, got.ErrorCode)
+			assertEqual(t, "FilterPrivilegeGroup() group count", tt.wantGroups, len(got.List))
+			assertEqual(t, "FilterPrivilegeGroup() total rows", tt.wantTotalRows, got.TotalRows)
 		})
 	}
 }
@@ -455,11 +451,10 @@ func TestPermissionAdminService_FilterPrivilegeGroupPrivileges(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newPermissionFixture(t)
 			got := f.service.FilterPrivilegeGroupPrivileges(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode ||
-				len(got.List) != tt.wantLinks || got.TotalRows != tt.wantTotalRows {
-				t.Fatalf("FilterPrivilegeGroupPrivileges() = %+v, want success %t, links %d, total %d, and code %d",
-					got, tt.wantSuccess, tt.wantLinks, tt.wantTotalRows, tt.wantCode)
-			}
+			assertEqual(t, "FilterPrivilegeGroupPrivileges() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "FilterPrivilegeGroupPrivileges() error code", tt.wantCode, got.ErrorCode)
+			assertEqual(t, "FilterPrivilegeGroupPrivileges() link count", tt.wantLinks, len(got.List))
+			assertEqual(t, "FilterPrivilegeGroupPrivileges() total rows", tt.wantTotalRows, got.TotalRows)
 		})
 	}
 }

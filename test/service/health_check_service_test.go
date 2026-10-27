@@ -28,12 +28,11 @@ func TestHealthCheckService_TestHealth(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := healthSvc.NewHealthCheckService().TestHealth(tt.input)
-			if got.Success != tt.wantSuccess {
-				t.Fatalf("TestHealth() success = %t, want %t", got.Success, tt.wantSuccess)
+			assertEqual(t, "TestHealth() success", tt.wantSuccess, got.Success)
+			if got.Health == nil {
+				t.Fatal("TestHealth() returned nil health")
 			}
-			if got.Health == nil || got.Health.ServiceCaller != tt.wantCaller {
-				t.Fatalf("TestHealth() health = %+v, want caller %q", got.Health, tt.wantCaller)
-			}
+			assertEqual(t, "TestHealth() caller", tt.wantCaller, got.Health.ServiceCaller)
 		})
 	}
 }

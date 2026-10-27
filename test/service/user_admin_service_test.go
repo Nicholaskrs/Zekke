@@ -62,9 +62,8 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserAdminFixture(t)
 			got := f.service.LoginUserAdmin(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("LoginUserAdmin() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "LoginUserAdmin() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "LoginUserAdmin() error code", tt.wantCode, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.RefreshToken{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
@@ -143,11 +142,10 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserAdminFixture(t)
 			got := f.service.FilterUser(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode ||
-				len(got.Users) != tt.wantUsers || got.TotalRows != tt.wantTotalRows {
-				t.Fatalf("FilterUser() = %+v, want success %t, users %d, total %d, and code %d",
-					got, tt.wantSuccess, tt.wantUsers, tt.wantTotalRows, tt.wantCode)
-			}
+			assertEqual(t, "FilterUser() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "FilterUser() error code", tt.wantCode, got.ErrorCode)
+			assertEqual(t, "FilterUser() user count", tt.wantUsers, len(got.Users))
+			assertEqual(t, "FilterUser() total rows", tt.wantTotalRows, got.TotalRows)
 			if calls := f.permissionMock.HasPrivilegeCalls(); len(calls) != 1 {
 				t.Fatalf("HasPrivilege calls = %d, want 1", len(calls))
 			}
@@ -229,9 +227,8 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserAdminFixture(t)
 			got := f.service.DeleteUser(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("DeleteUser() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "DeleteUser() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "DeleteUser() error code", tt.wantCode, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.User{}).Where("deleted_at IS NULL").Count(&count).Error; err != nil {
 				t.Fatal(err)
@@ -312,9 +309,8 @@ func TestUserAdminService_Refresh(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserAdminFixture(t)
 			got := f.service.Refresh(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("Refresh() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "Refresh() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "Refresh() error code", tt.wantCode, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.RefreshToken{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
@@ -399,9 +395,8 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 			f := newUserAdminFixture(t)
 			input := tt.setup(t, f)
 			got := f.service.ChangeAdminPassword(context.Background(), input)
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("ChangeAdminPassword() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "ChangeAdminPassword() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "ChangeAdminPassword() error code", tt.wantCode, got.ErrorCode)
 			var user model.User
 			err := f.db.First(&user, input.UserAdminId).Error
 			if err == nil && tt.wantStoredPassword != "" && !helpers.VerifyPassword(tt.wantStoredPassword, user.Password) {
@@ -530,9 +525,8 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserAdminFixture(t)
 			got := f.service.RegisterNewAdmin(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("RegisterNewAdmin() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "RegisterNewAdmin() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "RegisterNewAdmin() error code", tt.wantCode, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.User{}).Count(&count).Error; err != nil {
 				t.Fatal(err)

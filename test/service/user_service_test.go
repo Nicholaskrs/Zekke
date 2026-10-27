@@ -58,9 +58,8 @@ func TestUserService_LoginUser(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserFixture(t)
 			got := f.service.LoginUser(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("LoginUser() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "LoginUser() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "LoginUser() error code", tt.wantCode, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.RefreshToken{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
@@ -143,9 +142,8 @@ func TestUserService_Register(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserFixture(t)
 			got := f.service.Register(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("Register() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "Register() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "Register() error code", tt.wantCode, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.User{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
@@ -187,11 +185,10 @@ func TestUserService_GetUser(t *testing.T) {
 			f := newUserFixture(t)
 			id := tt.setup(t, f)
 			got := f.service.GetUser(context.Background(), &userSvc.GetUserIn{Trace: testTrace(), UserID: id})
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("GetUser() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
-			if tt.wantSuccess && got.User.ID != id {
-				t.Errorf("GetUser() user ID = %d, want %d", got.User.ID, id)
+			assertEqual(t, "GetUser() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "GetUser() error code", tt.wantCode, got.ErrorCode)
+			if tt.wantSuccess {
+				assertEqual(t, "GetUser() user ID", id, got.User.ID)
 			}
 		})
 	}
@@ -229,9 +226,8 @@ func TestUserService_InsertFcmToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserFixture(t)
 			got := f.service.InsertFcmToken(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("InsertFcmToken() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "InsertFcmToken() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "InsertFcmToken() error code", tt.wantCode, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.FcmToken{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
@@ -275,9 +271,7 @@ func TestUserService_DeleteFcmTokenBulk(t *testing.T) {
 			f := newUserFixture(t)
 			input := &userSvc.DeleteFcmTokenBulkIn{Trace: testTrace(), Tokens: tt.setup(t, f)}
 			got := f.service.DeleteFcmTokenBulk(context.Background(), input)
-			if got.Success != tt.wantSuccess {
-				t.Fatalf("DeleteFcmTokenBulk() = %+v, want success %t", got, tt.wantSuccess)
-			}
+			assertEqual(t, "DeleteFcmTokenBulk() success", tt.wantSuccess, got.Success)
 			var count int64
 			if err := f.db.Model(&model.FcmToken{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
@@ -329,9 +323,8 @@ func TestUserService_GetUserFcmToken(t *testing.T) {
 			got := f.service.GetUserFcmToken(context.Background(), &userSvc.GetUserFcmTokenIn{
 				Trace: testTrace(), UserID: tt.setup(t, f),
 			})
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("GetUserFcmToken() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "GetUserFcmToken() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "GetUserFcmToken() error code", tt.wantCode, got.ErrorCode)
 			if len(got.FcmTokens) != tt.wantTokenCount {
 				t.Fatalf("returned FCM token count = %d, want %d", len(got.FcmTokens), tt.wantTokenCount)
 			}
@@ -395,9 +388,8 @@ func TestUserService_Refresh(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserFixture(t)
 			got := f.service.Refresh(context.Background(), tt.setup(t, f))
-			if got.Success != tt.wantSuccess || got.ErrorCode != tt.wantCode {
-				t.Fatalf("Refresh() = %+v, want success %t and code %d", got, tt.wantSuccess, tt.wantCode)
-			}
+			assertEqual(t, "Refresh() success", tt.wantSuccess, got.Success)
+			assertEqual(t, "Refresh() error code", tt.wantCode, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.RefreshToken{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
