@@ -11,13 +11,13 @@ import (
 )
 
 type NotificationServiceImpl struct {
-	firebaseClient *firebase.Client
+	firebaseClient firebase.Sender
 	userService    userSvc.UserService
 	logger         logger2.Logger
 }
 
 func NewNotificationService(
-	firebaseClient *firebase.Client,
+	firebaseClient firebase.Sender,
 	userService userSvc.UserService,
 ) NotificationService {
 	return &NotificationServiceImpl{

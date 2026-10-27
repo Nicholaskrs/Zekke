@@ -65,6 +65,20 @@ The server starts on the port defined by `SERVER_PORT` (default `:9000`).
     ```
 - Both MySQL and PostgreSQL are supported — set `DB_DRIVER` to `mysql` or `postgres`.
 
+## Service tests
+
+Service integration tests are in `test/service`. They start one PostgreSQL 16 Testcontainer for the package run, create an isolated database for each test case, and call the production `Database.MigrateModels` runner (currently implemented with GORM `AutoMigrate`; the repository has no SQL migration files). Docker is required; container startup failures fail the test command rather than skipping database coverage.
+
+```sh
+go generate ./test/mocks
+go test ./test/service
+go test -race ./test/service
+go test -coverpkg=./modules/... -coverprofile=/tmp/zekke-coverage.out ./test/service
+go tool cover -func=/tmp/zekke-coverage.out
+```
+
+Generated dependency doubles use Moq v0.8.1, pinned in `test/mocks/generate.go`. Regenerate them with `go generate ./test/mocks` after changing a mocked interface.
+
 ## Environment Variables
 
 | Variable | Description |

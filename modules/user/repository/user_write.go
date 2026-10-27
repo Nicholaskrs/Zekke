@@ -58,6 +58,20 @@ func (w *UserRepositoryWrite) UpdateUser(param *model.User) error {
 	return w.transaction.Model(param).Where("id = ?", param.ID).Updates(param).Error
 }
 
+func (w *UserRepositoryWrite) DeleteUserByID(id uint) error {
+	result := w.transaction.Model(&model.User{}).
+		Where("id = ?", id).
+		Where("deleted_at IS NULL").
+		Update("deleted_at", gorm.Expr("now()"))
+	if result.Error != nil {
+		return helpers.Wrap(result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return w.RevokeRefreshTokenByUserID(id)
+}
+
 func (w *UserRepositoryWrite) CreateFcmToken(param *model.FcmToken) error {
 	if err := w.transaction.Create(param).Error; err != nil {
 		return helpers.Wrap(err)

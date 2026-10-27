@@ -215,22 +215,49 @@ func (i *UserAdminServiceImpl) FilterUser(ctx context.Context, paramIn *AdminFil
 func (i *UserAdminServiceImpl) DeleteUser(ctx context.Context, paramIn *AdminDeleteUserIn) *AdminDeleteUserOut {
 	resp := &AdminDeleteUserOut{}
 
-	i.PermissionAdminService.HasPrivilege(ctx, &permissionSvc.HasPrivilegeIn{
+	if paramIn.UserId <= 0 {
+		resp.ErrorMessage = "UserId empty"
+		resp.ErrorCode = http.StatusBadRequest
+		return resp
+	}
+
+	hasPrivilegeOut := i.PermissionAdminService.HasPrivilege(ctx, &permissionSvc.HasPrivilegeIn{
 		Trace:          paramIn.Trace,
 		PrivilegeGroup: paramIn.AdminPrivilegeGroup,
 		Privilege:      permission.PVDeleteUser,
 	})
+	if !hasPrivilegeOut.Success {
+		resp.ErrorMessage = hasPrivilegeOut.ErrorMessage
+		resp.ErrorCode = hasPrivilegeOut.ErrorCode
+		return resp
+	}
+	if !hasPrivilegeOut.IsAllowed {
+		resp.ErrorMessage = "User has no privilege"
+		resp.ErrorCode = http.StatusForbidden
+		return resp
+	}
 
 	repo := i.UserStorage.NewUserRepositoryWrite(ctx)
 	defer repo.Rollback(ctx)
 
-	//users, err := repo.(userRepo.FilterUser{}, paramIn.Page, paramIn.Limit)
-	//if err != nil {
-	//	i.Logger.WarnErr(paramIn.Trace, err).Msg("FilterUser(): failed to filter user")
-	//	resp.ErrorMessage = "failed to filter user"
-	//	resp.ErrorCode = http.StatusInternalServerError
-	//	return resp
-	//}
+	if err := repo.DeleteUserByID(uint(paramIn.UserId)); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			resp.ErrorMessage = err.Error()
+			resp.ErrorCode = http.StatusNotFound
+			return resp
+		}
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("DeleteUser(): failed to delete user")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
+
+	if err := repo.Commit(ctx); err != nil {
+		i.Logger.ErrorErr(paramIn.Trace, err).Msg("DeleteUser(): failed to commit")
+		resp.ErrorMessage = err.Error()
+		resp.ErrorCode = http.StatusInternalServerError
+		return resp
+	}
 
 	resp.Success = true
 	return resp
@@ -249,6 +276,7 @@ func (i *UserAdminServiceImpl) Refresh(ctx context.Context, paramIn *AdminRefres
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			resp.ErrorMessage = "Refresh token not found"
 			resp.ErrorCode = http.StatusNotFound
+			return resp
 		}
 		i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to lock refresh token")
 		resp.ErrorMessage = err.Error()
@@ -274,6 +302,12 @@ func (i *UserAdminServiceImpl) Refresh(ctx context.Context, paramIn *AdminRefres
 		err = repo.RevokeRefreshTokenByFamilyID(refreshToken.FamilyID)
 		if err != nil {
 			i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to revoke refresh token")
+			resp.ErrorMessage = err.Error()
+			resp.ErrorCode = http.StatusInternalServerError
+			return resp
+		}
+		if err = repo.Commit(ctx); err != nil {
+			i.Logger.ErrorErr(paramIn.Trace, err).Msg("Refresh(): failed to commit token revocation")
 			resp.ErrorMessage = err.Error()
 			resp.ErrorCode = http.StatusInternalServerError
 			return resp
@@ -494,6 +528,11 @@ func (i *UserAdminServiceImpl) RegisterNewAdmin(ctx context.Context, paramIn *Re
 		i.Logger.Error(paramIn.Trace).Msg("RegisterNewAdmin(): get admin privilege failed")
 		resp.ErrorMessage = getAdminGroupPrivilegeResp.ErrorMessage
 		resp.ErrorCode = getAdminGroupPrivilegeResp.ErrorCode
+		return resp
+	}
+	if getAdminGroupPrivilegeResp.IsExists == false {
+		resp.ErrorMessage = "PrivilegeGroup doesn't exists"
+		resp.ErrorCode = http.StatusBadRequest
 		return resp
 	}
 
