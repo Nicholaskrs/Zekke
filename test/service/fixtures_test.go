@@ -131,6 +131,22 @@ func withPasswordHash(passwordHash string) userSeedOption {
 	return func(user *model.User) { user.Password = passwordHash }
 }
 
+type userSeedData struct {
+	username     string
+	passwordHash string
+	role         string
+}
+
+func seedUserWithData(t *testing.T, db *gorm.DB, data userSeedData) *model.User {
+	t.Helper()
+	opts := []userSeedOption{
+		withUsername(data.username),
+		withPasswordHash(data.passwordHash),
+		withRole(data.role),
+	}
+	return seedUser(t, db, opts...)
+}
+
 func seedRole(t *testing.T, db *gorm.DB, code string) *model.Role {
 	t.Helper()
 	role := &model.Role{Code: code, Description: code + " role"}
