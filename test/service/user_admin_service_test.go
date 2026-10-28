@@ -13,86 +13,31 @@ import (
 	userSvc "template-go/modules/user/svc"
 )
 
-type userAdminServiceLoginUserAdminExpected struct {
-	success bool
-	code    int
-	tokens  int64
-}
-
-type userAdminServiceLoginUserAdminTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.LoginUserAdminIn
-	expected userAdminServiceLoginUserAdminExpected
-}
-
-type userAdminServiceFilterUserExpected struct {
-	success   bool
-	code      int
-	users     int
-	totalRows int
-}
-
-type userAdminServiceFilterUserTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminFilterUserIn
-	expected userAdminServiceFilterUserExpected
-}
-
-type userAdminServiceDeleteUserExpected struct {
-	success       bool
-	code          int
-	activeUsers   int64
-	privilegeCall int
-}
-
-type userAdminServiceDeleteUserTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminDeleteUserIn
-	expected userAdminServiceDeleteUserExpected
-}
-
-type userAdminServiceRefreshExpected struct {
-	success bool
-	code    int
-	tokens  int64
-}
-
-type userAdminServiceRefreshTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminRefreshIn
-	expected userAdminServiceRefreshExpected
-}
-
-type userAdminServiceChangeAdminPasswordExpected struct {
-	success        bool
-	code           int
-	storedPassword string
-}
-
-type userAdminServiceChangeAdminPasswordTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminChangePasswordIn
-	expected userAdminServiceChangeAdminPasswordExpected
-}
-
-type userAdminServiceRegisterNewAdminExpected struct {
-	success        bool
-	code           int
-	users          int64
-	assignCalls    int
-	privilegeCalls int
-}
-
-type userAdminServiceRegisterNewAdminTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn
-	expected userAdminServiceRegisterNewAdminExpected
-}
-
 func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 	t.Parallel()
 
-	tests := []userAdminServiceLoginUserAdminTestCase{
+	type expected struct {
+		success bool
+		code    int
+		tokens  int64
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *userAdminFixture) *userSvc.LoginUserAdminIn
+		expected expected
+	}
+
+	// Scenarios:
+	//
+	// +---------------------------------------+-----------------------------+
+	// | Scenario                               | Expected Code              |
+	// +---------------------------------------+-----------------------------+
+	// | valid administrator credentials        | success, 1 token            |
+	// | non-administrator account              | 401 Unauthorized             |
+	// | permission service failure             | 503 Service Unavailable      |
+	// +---------------------------------------+-----------------------------+
+	tests := []testCase{
 		{
 			name: "issues tokens for valid administrator credentials",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.LoginUserAdminIn {
@@ -104,7 +49,7 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 				}
 				return &userSvc.LoginUserAdminIn{Trace: testTrace(), Username: "admin", Password: "correct"}
 			},
-			expected: userAdminServiceLoginUserAdminExpected{success: true, tokens: 1},
+			expected: expected{success: true, tokens: 1},
 		},
 		{
 			name: "rejects non-administrator account",
@@ -112,7 +57,7 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 				seedUser(t, f.db, withUsername("regular"), withRole("User"), withPasswordHash(hashPassword(t, "correct")))
 				return &userSvc.LoginUserAdminIn{Trace: testTrace(), Username: "regular", Password: "correct"}
 			},
-			expected: userAdminServiceLoginUserAdminExpected{code: http.StatusUnauthorized},
+			expected: expected{code: http.StatusUnauthorized},
 		},
 		{
 			name: "returns permission service failure",
@@ -123,7 +68,7 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 				}
 				return &userSvc.LoginUserAdminIn{Trace: testTrace(), Username: "admin", Password: "correct"}
 			},
-			expected: userAdminServiceLoginUserAdminExpected{code: http.StatusServiceUnavailable},
+			expected: expected{code: http.StatusServiceUnavailable},
 		},
 	}
 
@@ -150,7 +95,29 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 func TestUserAdminService_FilterUser(t *testing.T) {
 	t.Parallel()
 
-	tests := []userAdminServiceFilterUserTestCase{
+	type expected struct {
+		success   bool
+		code      int
+		users     int
+		totalRows int
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminFilterUserIn
+		expected expected
+	}
+
+	// Scenarios:
+	//
+	// +----------------------------------+--------------------------------+
+	// | Scenario                         | Expected Code                  |
+	// +----------------------------------+--------------------------------+
+	// | active users, allowed            | success, 1 user, 1 total row   |
+	// | permission denied                | 403 Forbidden                   |
+	// | permission service error         | 503 Service Unavailable         |
+	// +----------------------------------+--------------------------------+
+	tests := []testCase{
 		{
 			name: "returns active users and count",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminFilterUserIn {
@@ -168,7 +135,7 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 					AdminUserId: 1, AdminPrivilegeGroup: "Root",
 				}
 			},
-			expected: userAdminServiceFilterUserExpected{success: true, users: 1, totalRows: 1},
+			expected: expected{success: true, users: 1, totalRows: 1},
 		},
 		{
 			name: "rejects denied permission",
@@ -181,7 +148,7 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 					AdminUserId: 1, AdminPrivilegeGroup: "Root",
 				}
 			},
-			expected: userAdminServiceFilterUserExpected{code: http.StatusForbidden},
+			expected: expected{code: http.StatusForbidden},
 		},
 		{
 			name: "propagates permission service error",
@@ -194,7 +161,7 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 					AdminUserId: 1, AdminPrivilegeGroup: "Root",
 				}
 			},
-			expected: userAdminServiceFilterUserExpected{code: http.StatusServiceUnavailable},
+			expected: expected{code: http.StatusServiceUnavailable},
 		},
 	}
 
@@ -216,7 +183,31 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 func TestUserAdminService_DeleteUser(t *testing.T) {
 	t.Parallel()
 
-	tests := []userAdminServiceDeleteUserTestCase{
+	type expected struct {
+		success       bool
+		code          int
+		activeUsers   int64
+		privilegeCall int
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminDeleteUserIn
+		expected expected
+	}
+
+	// Scenarios:
+	//
+	// +-------------------------------------------+---------------------------+
+	// | Scenario                                   | Expected Code            |
+	// +-------------------------------------------+---------------------------+
+	// | authorized soft-delete                      | success                  |
+	// | denied permission                           | 403 Forbidden            |
+	// | permission dependency failure                | 503 Service Unavailable  |
+	// | missing target user                         | 404 Not Found            |
+	// | zero target ID (no permission check)         | 400 Bad Request          |
+	// +-------------------------------------------+---------------------------+
+	tests := []testCase{
 		{
 			name: "soft-deletes target user when authorized",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminDeleteUserIn {
@@ -227,7 +218,7 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 				}
 				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: int(user.ID)}
 			},
-			expected: userAdminServiceDeleteUserExpected{success: true, privilegeCall: 1},
+			expected: expected{success: true, privilegeCall: 1},
 		},
 		{
 			name: "does not modify users when denied",
@@ -238,7 +229,7 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 				}
 				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: int(user.ID)}
 			},
-			expected: userAdminServiceDeleteUserExpected{code: http.StatusForbidden, activeUsers: 1, privilegeCall: 1},
+			expected: expected{code: http.StatusForbidden, activeUsers: 1, privilegeCall: 1},
 		},
 		{
 			name: "propagates permission dependency failure",
@@ -249,7 +240,7 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 				}
 				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: int(user.ID)}
 			},
-			expected: userAdminServiceDeleteUserExpected{code: http.StatusServiceUnavailable, activeUsers: 1, privilegeCall: 1},
+			expected: expected{code: http.StatusServiceUnavailable, activeUsers: 1, privilegeCall: 1},
 		},
 		{
 			name: "returns not found for missing target",
@@ -259,14 +250,14 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 				}
 				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: 42}
 			},
-			expected: userAdminServiceDeleteUserExpected{code: http.StatusNotFound, privilegeCall: 1},
+			expected: expected{code: http.StatusNotFound, privilegeCall: 1},
 		},
 		{
 			name: "rejects zero target ID without checking permission",
 			setup: func(t *testing.T, _ *userAdminFixture) *userSvc.AdminDeleteUserIn {
 				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root"}
 			},
-			expected: userAdminServiceDeleteUserExpected{code: http.StatusBadRequest},
+			expected: expected{code: http.StatusBadRequest},
 		},
 	}
 
@@ -302,7 +293,29 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 func TestUserAdminService_Refresh(t *testing.T) {
 	t.Parallel()
 
-	tests := []userAdminServiceRefreshTestCase{
+	type expected struct {
+		success bool
+		code    int
+		tokens  int64
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminRefreshIn
+		expected expected
+	}
+
+	// Scenarios:
+	//
+	// +---------------------------------------+-----------------------------+
+	// | Scenario                               | Expected Code              |
+	// +---------------------------------------+-----------------------------+
+	// | rotate valid admin refresh token       | success, 2 tokens           |
+	// | unknown token                          | 404 Not Found                |
+	// | expired token                          | 403 Forbidden, 1 token       |
+	// | reused token (family revoked)          | 403 Forbidden, 2 tokens      |
+	// +---------------------------------------+-----------------------------+
+	tests := []testCase{
 		{
 			name: "rotates administrator refresh token",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminRefreshIn {
@@ -311,7 +324,7 @@ func TestUserAdminService_Refresh(t *testing.T) {
 				seedRefreshToken(t, f.db, user.ID, "old-admin-token", "admin-family", time.Now().Add(time.Hour), nil)
 				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "old-admin-token"}
 			},
-			expected: userAdminServiceRefreshExpected{success: true, tokens: 2},
+			expected: expected{success: true, tokens: 2},
 		},
 		{
 			name: "returns not found for unknown token",
@@ -319,7 +332,7 @@ func TestUserAdminService_Refresh(t *testing.T) {
 				user := seedUser(t, f.db, withRole("Admin"))
 				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "missing"}
 			},
-			expected: userAdminServiceRefreshExpected{code: http.StatusNotFound},
+			expected: expected{code: http.StatusNotFound},
 		},
 		{
 			name: "rejects expired token",
@@ -328,7 +341,7 @@ func TestUserAdminService_Refresh(t *testing.T) {
 				seedRefreshToken(t, f.db, user.ID, "expired-admin", "admin-family", time.Now().Add(-time.Hour), nil)
 				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "expired-admin"}
 			},
-			expected: userAdminServiceRefreshExpected{code: http.StatusForbidden, tokens: 1},
+			expected: expected{code: http.StatusForbidden, tokens: 1},
 		},
 		{
 			name: "revokes family when used token is reused",
@@ -339,7 +352,7 @@ func TestUserAdminService_Refresh(t *testing.T) {
 				seedRefreshToken(t, f.db, user.ID, "sibling-admin", "admin-family", time.Now().Add(time.Hour), nil)
 				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "used-admin"}
 			},
-			expected: userAdminServiceRefreshExpected{code: http.StatusForbidden, tokens: 2},
+			expected: expected{code: http.StatusForbidden, tokens: 2},
 		},
 	}
 
@@ -372,7 +385,29 @@ func TestUserAdminService_Refresh(t *testing.T) {
 func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 	t.Parallel()
 
-	tests := []userAdminServiceChangeAdminPasswordTestCase{
+	type expected struct {
+		success        bool
+		code           int
+		storedPassword string
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminChangePasswordIn
+		expected expected
+	}
+
+	// Scenarios:
+	//
+	// +--------------------------------------------+---------------------------+
+	// | Scenario                                     | Expected Code            |
+	// +--------------------------------------------+---------------------------+
+	// | valid old password                           | success, new password    |
+	// | incorrect old password                       | 400 Bad Request           |
+	// | permission lookup failure (rolls back)       | 503 Service Unavailable   |
+	// | missing required ID                          | 400 Bad Request           |
+	// +--------------------------------------------+---------------------------+
+	tests := []testCase{
 		{
 			name: "updates password and issues a new refresh token",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminChangePasswordIn {
@@ -385,7 +420,7 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 					Trace: testTrace(), UserAdminId: int(user.ID), OldPassword: "old-password", NewPassword: "new-password",
 				}
 			},
-			expected: userAdminServiceChangeAdminPasswordExpected{success: true, storedPassword: "new-password"},
+			expected: expected{success: true, storedPassword: "new-password"},
 		},
 		{
 			name: "rejects incorrect old password without changing data",
@@ -395,7 +430,7 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 					Trace: testTrace(), UserAdminId: int(user.ID), OldPassword: "wrong", NewPassword: "new-password",
 				}
 			},
-			expected: userAdminServiceChangeAdminPasswordExpected{code: http.StatusBadRequest, storedPassword: "old-password"},
+			expected: expected{code: http.StatusBadRequest, storedPassword: "old-password"},
 		},
 		{
 			name: "rolls back password update if permission lookup fails",
@@ -408,14 +443,14 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 					Trace: testTrace(), UserAdminId: int(user.ID), OldPassword: "old-password", NewPassword: "new-password",
 				}
 			},
-			expected: userAdminServiceChangeAdminPasswordExpected{code: http.StatusServiceUnavailable, storedPassword: "old-password"},
+			expected: expected{code: http.StatusServiceUnavailable, storedPassword: "old-password"},
 		},
 		{
 			name: "validates required ID",
 			setup: func(t *testing.T, _ *userAdminFixture) *userSvc.AdminChangePasswordIn {
 				return &userSvc.AdminChangePasswordIn{Trace: testTrace(), OldPassword: "old", NewPassword: "new"}
 			},
-			expected: userAdminServiceChangeAdminPasswordExpected{code: http.StatusBadRequest},
+			expected: expected{code: http.StatusBadRequest},
 		},
 	}
 
@@ -449,7 +484,32 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 	t.Parallel()
 
-	tests := []userAdminServiceRegisterNewAdminTestCase{
+	type expected struct {
+		success        bool
+		code           int
+		users          int64
+		assignCalls    int
+		privilegeCalls int
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn
+		expected expected
+	}
+
+	// Scenarios:
+	//
+	// +---------------------------------------------+---------------------------+
+	// | Scenario                                      | Expected Code            |
+	// +---------------------------------------------+---------------------------+
+	// | registers admin, assigns group                 | success, 1 user          |
+	// | privilege group does not exist                  | 400 Bad Request          |
+	// | caller lacks registration privilege              | 403 Forbidden            |
+	// | rolls back user on group assignment failure      | 409 Conflict             |
+	// | duplicate username                               | 400 Bad Request          |
+	// +---------------------------------------------+---------------------------+
+	tests := []testCase{
 		{
 			name: "registers admin and assigns requested group",
 			setup: func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn {
@@ -468,7 +528,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 					FullName: "New Admin", PrivilegeGroup: "Auditor",
 				}
 			},
-			expected: userAdminServiceRegisterNewAdminExpected{success: true, users: 1, assignCalls: 1, privilegeCalls: 1},
+			expected: expected{success: true, users: 1, assignCalls: 1, privilegeCalls: 1},
 		},
 		{
 			name: "rejects a privilege group that does not exist",
@@ -481,7 +541,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 					Username: "new-admin", Email: "new-admin@example.test", Password: "password", PrivilegeGroup: "Missing",
 				}
 			},
-			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusBadRequest},
+			expected: expected{code: http.StatusBadRequest},
 		},
 		{
 			name: "rejects caller without registration privilege",
@@ -494,7 +554,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 				}
 				return &userSvc.RegisterNewAdminIn{Trace: testTrace(), UserAdminId: 1, AdminPrivilegeGroup: "Root", PrivilegeGroup: "Auditor"}
 			},
-			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusForbidden, privilegeCalls: 1},
+			expected: expected{code: http.StatusForbidden, privilegeCalls: 1},
 		},
 		{
 			name: "rolls back created user if group assignment fails",
@@ -513,7 +573,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 					Username: "new-admin", Email: "new-admin@example.test", Password: "password", PrivilegeGroup: "Auditor",
 				}
 			},
-			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusConflict, assignCalls: 1, privilegeCalls: 1},
+			expected: expected{code: http.StatusConflict, assignCalls: 1, privilegeCalls: 1},
 		},
 		{
 			name: "rejects duplicate username",
@@ -530,7 +590,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 					Username: "taken", Email: "new-admin@example.test", Password: "password", PrivilegeGroup: "Auditor",
 				}
 			},
-			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusBadRequest, users: 1, privilegeCalls: 1},
+			expected: expected{code: http.StatusBadRequest, users: 1, privilegeCalls: 1},
 		},
 	}
 
