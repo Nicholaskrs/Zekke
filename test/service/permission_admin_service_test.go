@@ -10,108 +10,31 @@ import (
 	permissionSvc "template-go/modules/permission/svc"
 )
 
-type permissionAdminServiceChangeAdminPrivilegeRoleExpected struct {
-	success bool
-	code    int
-	group   string
-}
-
-type permissionAdminServiceChangeAdminPrivilegeRoleTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *permissionFixture) *permissionSvc.ChangeAdminPrivilegeRoleIn
-	expected permissionAdminServiceChangeAdminPrivilegeRoleExpected
-}
-
-type permissionAdminServiceInsertNewPrivilegeGroupExpected struct {
-	success bool
-	code    int
-	groups  int64
-}
-
-type permissionAdminServiceInsertNewPrivilegeGroupTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *permissionFixture) *permissionSvc.InsertNewPrivilegeGroupIn
-	expected permissionAdminServiceInsertNewPrivilegeGroupExpected
-}
-
-type permissionAdminServiceAssignPrivilegeToGroupExpected struct {
-	success bool
-	code    int
-	links   int64
-}
-
-type permissionAdminServiceAssignPrivilegeToGroupTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *permissionFixture) *permissionSvc.AssignPrivilegeToGroupIn
-	expected permissionAdminServiceAssignPrivilegeToGroupExpected
-}
-
-type permissionAdminServiceHasPrivilegeExpected struct {
-	success bool
-	allowed bool
-	code    int
-}
-
-type permissionAdminServiceHasPrivilegeTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *permissionFixture) *permissionSvc.HasPrivilegeIn
-	expected permissionAdminServiceHasPrivilegeExpected
-}
-
-type permissionAdminServiceGetAdminGroupPrivilegeExpected struct {
-	success bool
-	code    int
-	group   string
-}
-
-type permissionAdminServiceGetAdminGroupPrivilegeTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *permissionFixture) *permissionSvc.GetAdminGroupPrivilegeIn
-	expected permissionAdminServiceGetAdminGroupPrivilegeExpected
-}
-
-type permissionAdminServiceCheckAdminGroupPrivilegeExistsExpected struct {
-	success bool
-	exists  bool
-	code    int
-}
-
-type permissionAdminServiceCheckAdminGroupPrivilegeExistsTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *permissionFixture) *permissionSvc.CheckAdminGroupPrivilegeExistsIn
-	expected permissionAdminServiceCheckAdminGroupPrivilegeExistsExpected
-}
-
-type permissionAdminServiceFilterPrivilegeGroupExpected struct {
-	success   bool
-	code      int
-	groups    int
-	totalRows int
-}
-
-type permissionAdminServiceFilterPrivilegeGroupTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *permissionFixture) *permissionSvc.FilterPrivilegeGroupIn
-	expected permissionAdminServiceFilterPrivilegeGroupExpected
-}
-
-type permissionAdminServiceFilterPrivilegeGroupPrivilegesExpected struct {
-	success   bool
-	code      int
-	links     int
-	totalRows int
-}
-
-type permissionAdminServiceFilterPrivilegeGroupPrivilegesTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *permissionFixture) *permissionSvc.FilterPrivilegeGroupPrivilegesIn
-	expected permissionAdminServiceFilterPrivilegeGroupPrivilegesExpected
-}
-
 func TestPermissionAdminService_ChangeAdminPrivilegeRole(t *testing.T) {
 	t.Parallel()
 
-	tests := []permissionAdminServiceChangeAdminPrivilegeRoleTestCase{
+	type expected struct {
+		success bool
+		code    int
+		group   string
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *permissionFixture) *permissionSvc.ChangeAdminPrivilegeRoleIn
+		expected expected
+	}
+
+	// Test cases:
+	//
+	// +--------------------------------------+-------------------+----------------+
+	// | Scenario                             | Expected Code     | Assigned Group |
+	// +--------------------------------------+-------------------+----------------+
+	// | assigns an existing privilege group  | 0 (success)       | Operator       |
+	// | rejects callers without privilege    | 403 Forbidden     | -              |
+	// | rejects an unknown target group      | 400 Bad Request   | -              |
+	// +--------------------------------------+-------------------+----------------+
+	tests := []testCase{
 		{
 			name: "assigns an existing privilege group",
 			setup: func(t *testing.T, f *permissionFixture) *permissionSvc.ChangeAdminPrivilegeRoleIn {
@@ -122,7 +45,7 @@ func TestPermissionAdminService_ChangeAdminPrivilegeRole(t *testing.T) {
 					TargetUserID: 7, NewPrivilegeGroup: "Operator",
 				}
 			},
-			expected: permissionAdminServiceChangeAdminPrivilegeRoleExpected{success: true, group: "Operator"},
+			expected: expected{success: true, group: "Operator"},
 		},
 		{
 			name: "rejects callers without privilege",
@@ -132,7 +55,7 @@ func TestPermissionAdminService_ChangeAdminPrivilegeRole(t *testing.T) {
 					TargetUserID: 7, NewPrivilegeGroup: "Operator",
 				}
 			},
-			expected: permissionAdminServiceChangeAdminPrivilegeRoleExpected{code: http.StatusForbidden},
+			expected: expected{code: http.StatusForbidden},
 		},
 		{
 			name: "rejects an unknown target group",
@@ -143,7 +66,7 @@ func TestPermissionAdminService_ChangeAdminPrivilegeRole(t *testing.T) {
 					TargetUserID: 7, NewPrivilegeGroup: "Missing",
 				}
 			},
-			expected: permissionAdminServiceChangeAdminPrivilegeRoleExpected{code: http.StatusBadRequest},
+			expected: expected{code: http.StatusBadRequest},
 		},
 	}
 
@@ -172,7 +95,28 @@ func TestPermissionAdminService_ChangeAdminPrivilegeRole(t *testing.T) {
 func TestPermissionAdminService_InsertNewPrivilegeGroup(t *testing.T) {
 	t.Parallel()
 
-	tests := []permissionAdminServiceInsertNewPrivilegeGroupTestCase{
+	type expected struct {
+		success bool
+		code    int
+		groups  int64
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *permissionFixture) *permissionSvc.InsertNewPrivilegeGroupIn
+		expected expected
+	}
+
+	// Test cases:
+	//
+	// +----------------------------------+-------------------+--------------+
+	// | Scenario                         | Expected Code     | Groups Count |
+	// +----------------------------------+-------------------+--------------+
+	// | inserts group when authorized    | 0 (success)        | 1            |
+	// | rejects caller without privilege | 403 Forbidden      | 0            |
+	// | validates required group         | 400 Bad Request    | 0            |
+	// +----------------------------------+-------------------+--------------+
+	tests := []testCase{
 		{
 			name: "inserts group when authorized",
 			setup: func(t *testing.T, f *permissionFixture) *permissionSvc.InsertNewPrivilegeGroupIn {
@@ -182,7 +126,7 @@ func TestPermissionAdminService_InsertNewPrivilegeGroup(t *testing.T) {
 					PrivilegeGroup: "Operator", Description: "Operations team",
 				}
 			},
-			expected: permissionAdminServiceInsertNewPrivilegeGroupExpected{success: true, groups: 1},
+			expected: expected{success: true, groups: 1},
 		},
 		{
 			name: "rejects caller without privilege",
@@ -192,14 +136,14 @@ func TestPermissionAdminService_InsertNewPrivilegeGroup(t *testing.T) {
 					PrivilegeGroup: "Operator",
 				}
 			},
-			expected: permissionAdminServiceInsertNewPrivilegeGroupExpected{code: http.StatusForbidden},
+			expected: expected{code: http.StatusForbidden},
 		},
 		{
 			name: "validates required group",
 			setup: func(t *testing.T, _ *permissionFixture) *permissionSvc.InsertNewPrivilegeGroupIn {
 				return &permissionSvc.InsertNewPrivilegeGroupIn{Trace: testTrace(), UserAdminId: 1, AdminPrivilegeGroup: "Root"}
 			},
-			expected: permissionAdminServiceInsertNewPrivilegeGroupExpected{code: http.StatusBadRequest},
+			expected: expected{code: http.StatusBadRequest},
 		},
 	}
 
@@ -223,7 +167,28 @@ func TestPermissionAdminService_InsertNewPrivilegeGroup(t *testing.T) {
 func TestPermissionAdminService_AssignPrivilegeToGroup(t *testing.T) {
 	t.Parallel()
 
-	tests := []permissionAdminServiceAssignPrivilegeToGroupTestCase{
+	type expected struct {
+		success bool
+		code    int
+		links   int64
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *permissionFixture) *permissionSvc.AssignPrivilegeToGroupIn
+		expected expected
+	}
+
+	// Test cases:
+	//
+	// +-------------------------------------+---------------------+-------+
+	// | Scenario                            | Expected Code       | Links |
+	// +-------------------------------------+---------------------+-------+
+	// | assigns privilege to target group   | 0 (success)         | 2     |
+	// | rejects caller without privilege    | 401 Unauthorized    | 0     |
+	// | rejects missing target group        | 400 Bad Request     | 1     |
+	// +-------------------------------------+---------------------+-------+
+	tests := []testCase{
 		{
 			name: "assigns privilege to target group",
 			setup: func(t *testing.T, f *permissionFixture) *permissionSvc.AssignPrivilegeToGroupIn {
@@ -234,7 +199,7 @@ func TestPermissionAdminService_AssignPrivilegeToGroup(t *testing.T) {
 					TargetPrivilegeGroup: "Operator", PrivilegeCode: "ReadReports",
 				}
 			},
-			expected: permissionAdminServiceAssignPrivilegeToGroupExpected{success: true, links: 2},
+			expected: expected{success: true, links: 2},
 		},
 		{
 			name: "rejects caller without privilege",
@@ -244,7 +209,7 @@ func TestPermissionAdminService_AssignPrivilegeToGroup(t *testing.T) {
 					TargetPrivilegeGroup: "Operator", PrivilegeCode: "ReadReports",
 				}
 			},
-			expected: permissionAdminServiceAssignPrivilegeToGroupExpected{code: http.StatusUnauthorized},
+			expected: expected{code: http.StatusUnauthorized},
 		},
 		{
 			name: "rejects missing target group",
@@ -255,7 +220,7 @@ func TestPermissionAdminService_AssignPrivilegeToGroup(t *testing.T) {
 					TargetPrivilegeGroup: "Missing", PrivilegeCode: "ReadReports",
 				}
 			},
-			expected: permissionAdminServiceAssignPrivilegeToGroupExpected{code: http.StatusBadRequest, links: 1},
+			expected: expected{code: http.StatusBadRequest, links: 1},
 		},
 	}
 
@@ -279,14 +244,35 @@ func TestPermissionAdminService_AssignPrivilegeToGroup(t *testing.T) {
 func TestPermissionAdminService_HasPrivilege(t *testing.T) {
 	t.Parallel()
 
-	tests := []permissionAdminServiceHasPrivilegeTestCase{
+	type expected struct {
+		success bool
+		allowed bool
+		code    int
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *permissionFixture) *permissionSvc.HasPrivilegeIn
+		expected expected
+	}
+
+	// Test cases:
+	//
+	// +---------------------------------------+-------------------+---------+
+	// | Scenario                              | Expected Code      | Allowed |
+	// +---------------------------------------+-------------------+---------+
+	// | returns true for assigned privilege   | 0 (success)        | true    |
+	// | returns false for unassigned privilege| 0 (success)        | false   |
+	// | rejects empty privilege group         | 400 Bad Request    | false   |
+	// +---------------------------------------+-------------------+---------+
+	tests := []testCase{
 		{
 			name: "returns true for assigned privilege",
 			setup: func(t *testing.T, f *permissionFixture) *permissionSvc.HasPrivilegeIn {
 				seedGroupPrivilege(t, f.db, "Operator", "ReadReports")
 				return &permissionSvc.HasPrivilegeIn{Trace: testTrace(), PrivilegeGroup: "Operator", Privilege: "ReadReports"}
 			},
-			expected: permissionAdminServiceHasPrivilegeExpected{success: true, allowed: true},
+			expected: expected{success: true, allowed: true},
 		},
 		{
 			name: "returns false for unassigned privilege",
@@ -294,14 +280,14 @@ func TestPermissionAdminService_HasPrivilege(t *testing.T) {
 				seedGroupPrivilege(t, f.db, "Operator", "ReadReports")
 				return &permissionSvc.HasPrivilegeIn{Trace: testTrace(), PrivilegeGroup: "Operator", Privilege: "DeleteReports"}
 			},
-			expected: permissionAdminServiceHasPrivilegeExpected{success: true},
+			expected: expected{success: true},
 		},
 		{
 			name: "rejects empty privilege group",
 			setup: func(t *testing.T, _ *permissionFixture) *permissionSvc.HasPrivilegeIn {
 				return &permissionSvc.HasPrivilegeIn{Trace: testTrace(), Privilege: "ReadReports"}
 			},
-			expected: permissionAdminServiceHasPrivilegeExpected{code: http.StatusBadRequest},
+			expected: expected{code: http.StatusBadRequest},
 		},
 	}
 
@@ -319,28 +305,49 @@ func TestPermissionAdminService_HasPrivilege(t *testing.T) {
 func TestPermissionAdminService_GetAdminGroupPrivilege(t *testing.T) {
 	t.Parallel()
 
-	tests := []permissionAdminServiceGetAdminGroupPrivilegeTestCase{
+	type expected struct {
+		success bool
+		code    int
+		group   string
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *permissionFixture) *permissionSvc.GetAdminGroupPrivilegeIn
+		expected expected
+	}
+
+	// Test cases:
+	//
+	// +--------------------------------------------+-------------------+-------+
+	// | Scenario                                   | Expected Code     | Group |
+	// +--------------------------------------------+-------------------+-------+
+	// | returns mapped admin group                 | 0 (success)       | Root  |
+	// | returns empty group when user has no mapping | 0 (success)     | ""    |
+	// | rejects zero user ID                        | 400 Bad Request  | ""    |
+	// +--------------------------------------------+-------------------+-------+
+	tests := []testCase{
 		{
 			name: "returns mapped admin group",
 			setup: func(t *testing.T, f *permissionFixture) *permissionSvc.GetAdminGroupPrivilegeIn {
 				seedUserPrivilegeGroup(t, f.db, 9, "Root")
 				return &permissionSvc.GetAdminGroupPrivilegeIn{Trace: testTrace(), UserAdminId: 9}
 			},
-			expected: permissionAdminServiceGetAdminGroupPrivilegeExpected{success: true, group: "Root"},
+			expected: expected{success: true, group: "Root"},
 		},
 		{
 			name: "returns empty group when user has no mapping",
 			setup: func(t *testing.T, _ *permissionFixture) *permissionSvc.GetAdminGroupPrivilegeIn {
 				return &permissionSvc.GetAdminGroupPrivilegeIn{Trace: testTrace(), UserAdminId: 9}
 			},
-			expected: permissionAdminServiceGetAdminGroupPrivilegeExpected{success: true},
+			expected: expected{success: true},
 		},
 		{
 			name: "rejects zero user ID",
 			setup: func(t *testing.T, _ *permissionFixture) *permissionSvc.GetAdminGroupPrivilegeIn {
 				return &permissionSvc.GetAdminGroupPrivilegeIn{Trace: testTrace()}
 			},
-			expected: permissionAdminServiceGetAdminGroupPrivilegeExpected{code: http.StatusBadRequest},
+			expected: expected{code: http.StatusBadRequest},
 		},
 	}
 
@@ -358,7 +365,28 @@ func TestPermissionAdminService_GetAdminGroupPrivilege(t *testing.T) {
 func TestPermissionAdminService_CheckAdminGroupPrivilegeExists(t *testing.T) {
 	t.Parallel()
 
-	tests := []permissionAdminServiceCheckAdminGroupPrivilegeExistsTestCase{
+	type expected struct {
+		success bool
+		exists  bool
+		code    int
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *permissionFixture) *permissionSvc.CheckAdminGroupPrivilegeExistsIn
+		expected expected
+	}
+
+	// Test cases:
+	//
+	// +---------------------------------------+-------------------+--------+
+	// | Scenario                               | Expected Code     | Exists |
+	// +---------------------------------------+-------------------+--------+
+	// | returns true for existing group        | 0 (success)       | true   |
+	// | returns false when group is missing    | 0 (success)       | false  |
+	// | rejects caller without privilege       | 403 Forbidden     | false  |
+	// +---------------------------------------+-------------------+--------+
+	tests := []testCase{
 		{
 			name: "returns true for existing group",
 			setup: func(t *testing.T, f *permissionFixture) *permissionSvc.CheckAdminGroupPrivilegeExistsIn {
@@ -366,7 +394,7 @@ func TestPermissionAdminService_CheckAdminGroupPrivilegeExists(t *testing.T) {
 				seedPrivilegeGroup(t, f.db, "Root")
 				return &permissionSvc.CheckAdminGroupPrivilegeExistsIn{Trace: testTrace(), AdminPrivilegeGroup: "Root"}
 			},
-			expected: permissionAdminServiceCheckAdminGroupPrivilegeExistsExpected{success: true, exists: true},
+			expected: expected{success: true, exists: true},
 		},
 		{
 			name: "returns false when group is missing",
@@ -374,14 +402,14 @@ func TestPermissionAdminService_CheckAdminGroupPrivilegeExists(t *testing.T) {
 				seedGroupPrivilege(t, f.db, "Missing", permissionConst.PVCheckAdminGroupPrivilegeExists)
 				return &permissionSvc.CheckAdminGroupPrivilegeExistsIn{Trace: testTrace(), AdminPrivilegeGroup: "Missing"}
 			},
-			expected: permissionAdminServiceCheckAdminGroupPrivilegeExistsExpected{success: true},
+			expected: expected{success: true},
 		},
 		{
 			name: "rejects caller without privilege",
 			setup: func(t *testing.T, _ *permissionFixture) *permissionSvc.CheckAdminGroupPrivilegeExistsIn {
 				return &permissionSvc.CheckAdminGroupPrivilegeExistsIn{Trace: testTrace(), AdminPrivilegeGroup: "Root"}
 			},
-			expected: permissionAdminServiceCheckAdminGroupPrivilegeExistsExpected{code: http.StatusForbidden},
+			expected: expected{code: http.StatusForbidden},
 		},
 	}
 
@@ -399,7 +427,29 @@ func TestPermissionAdminService_CheckAdminGroupPrivilegeExists(t *testing.T) {
 func TestPermissionAdminService_FilterPrivilegeGroup(t *testing.T) {
 	t.Parallel()
 
-	tests := []permissionAdminServiceFilterPrivilegeGroupTestCase{
+	type expected struct {
+		success   bool
+		code      int
+		groups    int
+		totalRows int
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *permissionFixture) *permissionSvc.FilterPrivilegeGroupIn
+		expected expected
+	}
+
+	// Test cases:
+	//
+	// +---------------------------------------+-------------------+--------+-----------+
+	// | Scenario                               | Expected Code     | Groups | TotalRows |
+	// +---------------------------------------+-------------------+--------+-----------+
+	// | returns groups with total count        | 0 (success)       | 2      | 2         |
+	// | rejects invalid pagination             | 400 Bad Request   | 0      | 0         |
+	// | rejects callers without privilege       | 403 Forbidden     | 0      | 0         |
+	// +---------------------------------------+-------------------+--------+-----------+
+	tests := []testCase{
 		{
 			name: "returns groups with total count",
 			setup: func(t *testing.T, f *permissionFixture) *permissionSvc.FilterPrivilegeGroupIn {
@@ -410,7 +460,7 @@ func TestPermissionAdminService_FilterPrivilegeGroup(t *testing.T) {
 					Trace: testTrace(), AdminPrivilegeGroup: "Root", AdminUserId: 1, Page: 1, Limit: 10,
 				}
 			},
-			expected: permissionAdminServiceFilterPrivilegeGroupExpected{success: true, groups: 2, totalRows: 2},
+			expected: expected{success: true, groups: 2, totalRows: 2},
 		},
 		{
 			name: "rejects invalid pagination",
@@ -419,7 +469,7 @@ func TestPermissionAdminService_FilterPrivilegeGroup(t *testing.T) {
 					Trace: testTrace(), AdminPrivilegeGroup: "Root", AdminUserId: 1, Page: 0, Limit: 10,
 				}
 			},
-			expected: permissionAdminServiceFilterPrivilegeGroupExpected{code: http.StatusBadRequest},
+			expected: expected{code: http.StatusBadRequest},
 		},
 		{
 			name: "rejects callers without privilege",
@@ -428,7 +478,7 @@ func TestPermissionAdminService_FilterPrivilegeGroup(t *testing.T) {
 					Trace: testTrace(), AdminPrivilegeGroup: "Root", AdminUserId: 1, Page: 1, Limit: 10,
 				}
 			},
-			expected: permissionAdminServiceFilterPrivilegeGroupExpected{code: http.StatusForbidden},
+			expected: expected{code: http.StatusForbidden},
 		},
 	}
 
@@ -447,7 +497,29 @@ func TestPermissionAdminService_FilterPrivilegeGroup(t *testing.T) {
 func TestPermissionAdminService_FilterPrivilegeGroupPrivileges(t *testing.T) {
 	t.Parallel()
 
-	tests := []permissionAdminServiceFilterPrivilegeGroupPrivilegesTestCase{
+	type expected struct {
+		success   bool
+		code      int
+		links     int
+		totalRows int
+	}
+
+	type testCase struct {
+		name     string
+		setup    func(t *testing.T, f *permissionFixture) *permissionSvc.FilterPrivilegeGroupPrivilegesIn
+		expected expected
+	}
+
+	// Test cases:
+	//
+	// +---------------------------------------+-------------------+-------+-----------+
+	// | Scenario                               | Expected Code     | Links | TotalRows |
+	// +---------------------------------------+-------------------+-------+-----------+
+	// | returns group privilege links          | 0 (success)       | 2     | 2         |
+	// | rejects missing privilege group        | 403 Forbidden     | 0     | 0         |
+	// | rejects invalid page size               | 400 Bad Request   | 0     | 0         |
+	// +---------------------------------------+-------------------+-------+-----------+
+	tests := []testCase{
 		{
 			name: "returns group privilege links",
 			setup: func(t *testing.T, f *permissionFixture) *permissionSvc.FilterPrivilegeGroupPrivilegesIn {
@@ -459,7 +531,7 @@ func TestPermissionAdminService_FilterPrivilegeGroupPrivileges(t *testing.T) {
 					PrivilegeGroup: "Operator", Page: 1, Limit: 10,
 				}
 			},
-			expected: permissionAdminServiceFilterPrivilegeGroupPrivilegesExpected{success: true, links: 2, totalRows: 2},
+			expected: expected{success: true, links: 2, totalRows: 2},
 		},
 		{
 			name: "rejects missing privilege group",
@@ -469,7 +541,7 @@ func TestPermissionAdminService_FilterPrivilegeGroupPrivileges(t *testing.T) {
 					PrivilegeGroup: "Operator", Page: 1, Limit: 10,
 				}
 			},
-			expected: permissionAdminServiceFilterPrivilegeGroupPrivilegesExpected{code: http.StatusForbidden},
+			expected: expected{code: http.StatusForbidden},
 		},
 		{
 			name: "rejects invalid page size",
@@ -480,7 +552,7 @@ func TestPermissionAdminService_FilterPrivilegeGroupPrivileges(t *testing.T) {
 					PrivilegeGroup: "Operator", Page: 1, Limit: 0,
 				}
 			},
-			expected: permissionAdminServiceFilterPrivilegeGroupPrivilegesExpected{code: http.StatusBadRequest},
+			expected: expected{code: http.StatusBadRequest},
 		},
 	}
 
