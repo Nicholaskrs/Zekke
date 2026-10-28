@@ -11,17 +11,6 @@ import (
 	userSvc "template-go/modules/user/svc"
 )
 
-type userServiceLoginUserExpected struct {
-	success bool
-	code    int
-}
-
-type userServiceLoginUserTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userFixture) *userSvc.LoginUserIn
-	expected userServiceLoginUserExpected
-}
-
 type userServiceRegisterExpected struct {
 	success bool
 	code    int
@@ -95,60 +84,99 @@ type userServiceRefreshTestCase struct {
 func TestUserService_LoginUser(t *testing.T) {
 	t.Parallel()
 
-	tests := []userServiceLoginUserTestCase{
+	type testCase struct {
+		name           string
+		username       string
+		password       string
+		expectedCode   int
+		expectedResult int // 0 = success, 1 = unauthorized
+	}
+
+	// Seed data:
+	//
+	// +------------+-----------------+----------+
+	// | Username   | Password        | Role     |
+	// +------------+-----------------+----------+
+	// | login-user | valid-password  | User     |
+	// | admin      | valid-password  | Admin    |
+	// +------------+-----------------+----------+
+	seedSharedData := func(t *testing.T, f *userFixture) {
+		passwordHash := hashPassword(t, "valid-password")
+		seedUser(t, f.db, withUsername("login-user"), withPasswordHash(passwordHash))
+		seedUser(t, f.db, withUsername("admin"), withRole("Admin"), withPasswordHash(passwordHash))
+	}
+
+	// Test cases:
+	//
+	// +------------+-----------------+------------------------------------------+--------+
+	// | Username   | Password        | Expected Result                          | Code   |
+	// +------------+-----------------+------------------------------------------+--------+
+	// | login-user | valid-password  | Success (issues tokens)                  | 0      |
+	// | missing    | valid-password  | Unauthorized                             | 401    |
+	// | login-user | incorrect       | Unauthorized                             | 401    |
+	// | admin      | valid-password  | Unauthorized (admin cannot use public)   | 401    |
+	// +------------+-----------------+------------------------------------------+--------+
+	tests := []testCase{
 		{
-			name: "issues access and refresh tokens for valid credentials",
-			setup: func(t *testing.T, f *userFixture) *userSvc.LoginUserIn {
-				passwordHash := hashPassword(t, "valid-password")
-				seedUser(t, f.db, withUsername("login-user"), withPasswordHash(passwordHash))
-				return &userSvc.LoginUserIn{Trace: testTrace(), Username: "login-user", Password: "valid-password"}
-			},
-			expected: userServiceLoginUserExpected{success: true},
+			name:           "issues access and refresh tokens for valid credentials",
+			username:       "login-user",
+			password:       "valid-password",
+			expectedResult: 0,
 		},
 		{
-			name: "rejects unknown username",
-			setup: func(t *testing.T, _ *userFixture) *userSvc.LoginUserIn {
-				return &userSvc.LoginUserIn{Trace: testTrace(), Username: "missing", Password: "valid-password"}
-			},
-			expected: userServiceLoginUserExpected{code: http.StatusUnauthorized},
+			name:           "rejects unknown username",
+			username:       "missing",
+			password:       "valid-password",
+			expectedCode:   http.StatusUnauthorized,
+			expectedResult: 1,
 		},
 		{
-			name: "rejects incorrect password",
-			setup: func(t *testing.T, f *userFixture) *userSvc.LoginUserIn {
-				seedUser(t, f.db, withUsername("login-user"), withPasswordHash(hashPassword(t, "valid-password")))
-				return &userSvc.LoginUserIn{Trace: testTrace(), Username: "login-user", Password: "incorrect"}
-			},
-			expected: userServiceLoginUserExpected{code: http.StatusUnauthorized},
+			name:           "rejects incorrect password",
+			username:       "login-user",
+			password:       "incorrect",
+			expectedCode:   http.StatusUnauthorized,
+			expectedResult: 1,
 		},
 		{
-			name: "does not allow administrator accounts to use public login",
-			setup: func(t *testing.T, f *userFixture) *userSvc.LoginUserIn {
-				seedUser(t, f.db, withUsername("admin"), withRole("Admin"), withPasswordHash(hashPassword(t, "valid-password")))
-				return &userSvc.LoginUserIn{Trace: testTrace(), Username: "admin", Password: "valid-password"}
-			},
-			expected: userServiceLoginUserExpected{code: http.StatusUnauthorized},
+			name:           "does not allow administrator accounts to use public login",
+			username:       "admin",
+			password:       "valid-password",
+			expectedCode:   http.StatusUnauthorized,
+			expectedResult: 1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserFixture(t)
-			got := f.service.LoginUser(context.Background(), tt.setup(t, f))
-			assertEqual(t, "LoginUser() success", tt.expected.success, got.Success)
-			assertEqual(t, "LoginUser() error code", tt.expected.code, got.ErrorCode)
+			seedSharedData(t, f)
+			got := f.service.LoginUser(context.Background(), &userSvc.LoginUserIn{
+				Trace:    testTrace(),
+				Username: tt.username,
+				Password: tt.password,
+			})
+			assertEqual(t, "LoginUser() error code", tt.expectedCode, got.ErrorCode)
 			var count int64
 			if err := f.db.Model(&model.RefreshToken{}).Count(&count).Error; err != nil {
 				t.Fatal(err)
 			}
-			if tt.expected.success {
+			if tt.expectedResult == 0 { // success
+				if got.Success == false {
+					t.Fatal("LoginUser() expected success")
+				}
 				if got.Token == "" || got.RefreshToken == "" {
 					t.Fatal("LoginUser() returned an empty access or refresh token")
 				}
 				if count != 1 {
 					t.Fatalf("persisted refresh token count = %d, want 1", count)
 				}
-			} else if count != 0 {
-				t.Fatalf("persisted refresh token count = %d after rejected login, want 0", count)
+			} else { // unauthorized
+				if got.Success == true {
+					t.Fatal("LoginUser() expected failure")
+				}
+				if count != 0 {
+					t.Fatalf("persisted refresh token count = %d after rejected login, want 0", count)
+				}
 			}
 		})
 	}
