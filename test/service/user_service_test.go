@@ -92,6 +92,12 @@ func TestUserService_LoginUser(t *testing.T) {
 		expectedResult int // 0 = success, 1 = unauthorized
 	}
 
+	type seedData struct {
+		username     string
+		password     string
+		role         string
+	}
+
 	// Seed data:
 	//
 	// +------------+-----------------+----------+
@@ -100,22 +106,18 @@ func TestUserService_LoginUser(t *testing.T) {
 	// | login-user | valid-password  | User     |
 	// | admin      | valid-password  | Admin    |
 	// +------------+-----------------+----------+
-	seedSharedData := func(t *testing.T, f *userFixture) {
-		passwordHash := hashPassword(t, "valid-password")
-		seedUser(t, f.db, withUsername("login-user"), withPasswordHash(passwordHash))
-		seedUser(t, f.db, withUsername("admin"), withRole("Admin"), withPasswordHash(passwordHash))
+	users := []seedData{
+		{username: "login-user", password: "valid-password", role: "User"},
+		{username: "admin", password: "valid-password", role: "Admin"},
 	}
 
-	// Test cases:
-	//
-	// +------------+-----------------+------------------------------------------+--------+
-	// | Username   | Password        | Expected Result                          | Code   |
-	// +------------+-----------------+------------------------------------------+--------+
-	// | login-user | valid-password  | Success (issues tokens)                  | 0      |
-	// | missing    | valid-password  | Unauthorized                             | 401    |
-	// | login-user | incorrect       | Unauthorized                             | 401    |
-	// | admin      | valid-password  | Unauthorized (admin cannot use public)   | 401    |
-	// +------------+-----------------+------------------------------------------+--------+
+	seedSharedData := func(t *testing.T, f *userFixture) {
+		passwordHash := hashPassword(t, "valid-password")
+		for _, u := range users {
+			seedUser(t, f.db, withUsername(u.username), withPasswordHash(passwordHash), withRole(u.role))
+		}
+	}
+
 	tests := []testCase{
 		{
 			name:           "issues access and refresh tokens for valid credentials",
