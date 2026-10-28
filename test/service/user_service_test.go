@@ -93,9 +93,9 @@ func TestUserService_LoginUser(t *testing.T) {
 	}
 
 	type seedData struct {
-		username     string
-		password     string
-		role         string
+		username string
+		password string
+		role     string
 	}
 
 	// Seed data:
@@ -114,7 +114,11 @@ func TestUserService_LoginUser(t *testing.T) {
 	seedSharedData := func(t *testing.T, f *userFixture) {
 		passwordHash := hashPassword(t, "valid-password")
 		for _, u := range users {
-			seedUser(t, f.db, withUsername(u.username), withPasswordHash(passwordHash), withRole(u.role))
+			seedUserWithData(t, f.db, userSeedData{
+				username:     u.username,
+				passwordHash: passwordHash,
+				role:         u.role,
+			})
 		}
 	}
 
