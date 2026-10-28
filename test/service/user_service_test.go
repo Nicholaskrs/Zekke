@@ -30,15 +30,6 @@ func TestUserService_LoginUser(t *testing.T) {
 	loginUser := seedUser(t, db, withUsername("login-user"), withPasswordHash(passwordHash))
 	seedUser(t, db, withUsername("admin"), withRole("Admin"), withPasswordHash(passwordHash))
 
-	// LoginUser cases:
-	// +------------+-----------------+-----------------+------+
-	// | Username   | Password        | Expected result | Code |
-	// +------------+-----------------+-----------------+------+
-	// | login-user | valid-password  | success         | 0    |
-	// | missing    | valid-password  | unauthorized    | 401  |
-	// | login-user | incorrect       | unauthorized    | 401  |
-	// | admin      | valid-password  | unauthorized    | 401  |
-	// +------------+-----------------+-----------------+------+
 	tests := []testCase{
 		{
 			name:     "issues access and refresh tokens for valid credentials",
@@ -185,13 +176,6 @@ func TestUserService_GetUser(t *testing.T) {
 	f := newUserFixture(t)
 	user := seedUser(t, f.db)
 
-	// GetUser cases:
-	// +------------------+-----------------+
-	// | User ID          | Expected result |
-	// +------------------+-----------------+
-	// | existing user ID | success         |
-	// | 99               | not found       |
-	// +------------------+-----------------+
 	tests := []testCase{
 		{
 			name:     "returns existing user",
@@ -332,14 +316,6 @@ func TestUserService_GetUserFcmToken(t *testing.T) {
 	withoutToken := seedUser(t, f.db)
 	seedFCMToken(t, f.db, withToken.ID, "token-1")
 
-	// GetUserFcmToken cases:
-	// +------------------+-----------------+-------------+
-	// | User             | Expected result | Token count |
-	// +------------------+-----------------+-------------+
-	// | with token       | success         | 1           |
-	// | without token    | success         | 0           |
-	// | missing user     | not found       | 0           |
-	// +------------------+-----------------+-------------+
 	tests := []testCase{
 		{
 			name:     "returns a user's tokens",

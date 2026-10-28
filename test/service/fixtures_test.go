@@ -100,6 +100,7 @@ func testTrace() *logtrace.LogTrace {
 
 type userSeedOption func(*model.User)
 
+// seedUser inserts a user with defaults that can be overridden by options.
 func seedUser(t *testing.T, db *gorm.DB, opts ...userSeedOption) *model.User {
 	t.Helper()
 	user := &model.User{
@@ -119,22 +120,27 @@ func seedUser(t *testing.T, db *gorm.DB, opts ...userSeedOption) *model.User {
 	return user
 }
 
+// withUsername overrides the seeded user's username.
 func withUsername(username string) userSeedOption {
 	return func(user *model.User) { user.Username = username }
 }
 
+// withEmail overrides the seeded user's email.
 func withEmail(email string) userSeedOption {
 	return func(user *model.User) { user.Email = email }
 }
 
+// withRole overrides the seeded user's role.
 func withRole(role string) userSeedOption {
 	return func(user *model.User) { user.Role = role }
 }
 
+// withPasswordHash overrides the seeded user's password hash.
 func withPasswordHash(passwordHash string) userSeedOption {
 	return func(user *model.User) { user.Password = passwordHash }
 }
 
+// seedRole inserts a role with a description derived from its code.
 func seedRole(t *testing.T, db *gorm.DB, code string) *model.Role {
 	t.Helper()
 	role := &model.Role{Code: code, Description: code + " role"}
@@ -144,6 +150,7 @@ func seedRole(t *testing.T, db *gorm.DB, code string) *model.Role {
 	return role
 }
 
+// seedPrivilegeGroup inserts a privilege group with a description derived from its code.
 func seedPrivilegeGroup(t *testing.T, db *gorm.DB, code string) *model.PrivilegeGroup {
 	t.Helper()
 	group := &model.PrivilegeGroup{Code: code, Description: code + " group"}
@@ -153,6 +160,7 @@ func seedPrivilegeGroup(t *testing.T, db *gorm.DB, code string) *model.Privilege
 	return group
 }
 
+// seedGroupPrivilege inserts a privilege link for the specified group.
 func seedGroupPrivilege(t *testing.T, db *gorm.DB, group, privilege string) *model.PrivilegeGroupPrivilege {
 	t.Helper()
 	link := &model.PrivilegeGroupPrivilege{PrivilegeGroupCode: group, Privilege: privilege}
@@ -162,6 +170,7 @@ func seedGroupPrivilege(t *testing.T, db *gorm.DB, group, privilege string) *mod
 	return link
 }
 
+// seedUserPrivilegeGroup assigns a user to the specified privilege group.
 func seedUserPrivilegeGroup(t *testing.T, db *gorm.DB, userID uint, group string) {
 	t.Helper()
 	if err := db.Create(&model.UserPrivilegeGroup{UserID: userID, PrivilegeGroupCode: group}).Error; err != nil {
@@ -169,6 +178,7 @@ func seedUserPrivilegeGroup(t *testing.T, db *gorm.DB, userID uint, group string
 	}
 }
 
+// seedFCMToken inserts an FCM token for the specified user.
 func seedFCMToken(t *testing.T, db *gorm.DB, userID uint, token string) *model.FcmToken {
 	t.Helper()
 	now := time.Now()
@@ -186,6 +196,7 @@ func seedFCMToken(t *testing.T, db *gorm.DB, userID uint, token string) *model.F
 	return fcmToken
 }
 
+// seedRefreshToken inserts a refresh token after hashing its raw token value.
 func seedRefreshToken(t *testing.T, db *gorm.DB, userID uint, rawToken, familyID string, expireAt time.Time, usedAt *time.Time) *model.RefreshToken {
 	t.Helper()
 	now := time.Now()

@@ -274,14 +274,6 @@ func TestPermissionAdminService_GetAdminGroupPrivilege(t *testing.T) {
 	f := newPermissionFixture(t)
 	seedUserPrivilegeGroup(t, f.db, 9, "Root")
 
-	// GetAdminGroupPrivilege cases:
-	// +----------+-----------------+-------+
-	// | User ID  | Expected result | Group |
-	// +----------+-----------------+-------+
-	// | 9        | success         | Root  |
-	// | 10       | success         | empty |
-	// | 0        | bad request     | empty |
-	// +----------+-----------------+-------+
 	tests := []testCase{
 		{
 			name:     "returns mapped admin group",
@@ -329,14 +321,6 @@ func TestPermissionAdminService_CheckAdminGroupPrivilegeExists(t *testing.T) {
 	seedPrivilegeGroup(t, f.db, "Authorized")
 	seedGroupPrivilege(t, f.db, "Missing", permissionConst.PVCheckAdminGroupPrivilegeExists)
 
-	// CheckAdminGroupPrivilegeExists cases:
-	// +----------------+-----------------+--------+
-	// | Group          | Expected result | Exists |
-	// +----------------+-----------------+--------+
-	// | Authorized     | success         | true   |
-	// | Missing        | success         | false  |
-	// | Root           | forbidden       | false  |
-	// +----------------+-----------------+--------+
 	tests := []testCase{
 		{
 			name:     "returns true for existing group",
@@ -385,14 +369,6 @@ func TestPermissionAdminService_FilterPrivilegeGroup(t *testing.T) {
 	seedPrivilegeGroup(t, f.db, "Operator")
 	seedPrivilegeGroup(t, f.db, "Auditor")
 
-	// FilterPrivilegeGroup cases:
-	// +------------------+-------------------+--------+------------+
-	// | Caller privilege | Input             | Groups | Total rows |
-	// +------------------+-------------------+--------+------------+
-	// | authorized       | valid pagination  | 2      | 2          |
-	// | authorized       | invalid page       | 0      | 0          |
-	// | missing          | valid pagination  | 0      | 0          |
-	// +------------------+-------------------+--------+------------+
 	tests := []testCase{
 		{
 			name: "returns groups with total count",
@@ -448,14 +424,6 @@ func TestPermissionAdminService_FilterPrivilegeGroupPrivileges(t *testing.T) {
 	seedGroupPrivilege(t, f.db, "Operator", "ReadReports")
 	seedGroupPrivilege(t, f.db, "Operator", "WriteReports")
 
-	// FilterPrivilegeGroupPrivileges cases:
-	// +-------------------+-----------------+-------+------------+
-	// | Caller privilege  | Expected result | Links | Total rows |
-	// +-------------------+-----------------+-------+------------+
-	// | authorized        | success         | 2     | 2          |
-	// | no privilege      | forbidden       | 0     | 0          |
-	// | authorized        | bad request     | 0     | 0          |
-	// +-------------------+-----------------+-------+------------+
 	tests := []testCase{
 		{
 			name: "returns group privilege links",
