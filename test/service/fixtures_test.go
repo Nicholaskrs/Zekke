@@ -27,6 +27,10 @@ type userFixture struct {
 func newUserFixture(t *testing.T) *userFixture {
 	t.Helper()
 	db, cfg := newTestDatabase(t)
+	return newUserFixtureWithDB(db, cfg)
+}
+
+func newUserFixtureWithDB(db *gorm.DB, cfg config.Config) *userFixture {
 	storage := userRepo.NewUserStorage(db)
 	return &userFixture{
 		db:      db,

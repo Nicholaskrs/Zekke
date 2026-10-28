@@ -18,7 +18,7 @@ type userServiceLoginUserExpected struct {
 
 type userServiceLoginUserTestCase struct {
 	name     string
-	setup    func(t *testing.T, f *userFixture) *userSvc.LoginUserIn
+	input    *userSvc.LoginUserIn
 	expected userServiceLoginUserExpected
 }
 
@@ -41,7 +41,7 @@ type userServiceGetUserExpected struct {
 
 type userServiceGetUserTestCase struct {
 	name     string
-	setup    func(t *testing.T, f *userFixture) uint
+	input    *userSvc.GetUserIn
 	expected userServiceGetUserExpected
 }
 
@@ -76,7 +76,7 @@ type userServiceGetUserFcmTokenExpected struct {
 
 type userServiceGetUserFcmTokenTestCase struct {
 	name     string
-	setup    func(t *testing.T, f *userFixture) uint
+	input    *userSvc.GetUserFcmTokenIn
 	expected userServiceGetUserFcmTokenExpected
 }
 
@@ -95,45 +95,52 @@ type userServiceRefreshTestCase struct {
 func TestUserService_LoginUser(t *testing.T) {
 	t.Parallel()
 
+	db, cfg := newTestDatabase(t)
+	f := newUserFixtureWithDB(db, cfg)
+	passwordHash := hashPassword(t, "valid-password")
+	loginUser := seedUser(t, db, withUsername("login-user"), withPasswordHash(passwordHash))
+	seedUser(t, db, withUsername("admin"), withRole("Admin"), withPasswordHash(passwordHash))
+
+	// LoginUser cases:
+	// +------------+-----------------+-----------------+------+
+	// | Username   | Password        | Expected result | Code |
+	// +------------+-----------------+-----------------+------+
+	// | login-user | valid-password  | success         | 0    |
+	// | missing    | valid-password  | unauthorized    | 401  |
+	// | login-user | incorrect       | unauthorized    | 401  |
+	// | admin      | valid-password  | unauthorized    | 401  |
+	// +------------+-----------------+-----------------+------+
 	tests := []userServiceLoginUserTestCase{
 		{
-			name: "issues access and refresh tokens for valid credentials",
-			setup: func(t *testing.T, f *userFixture) *userSvc.LoginUserIn {
-				passwordHash := hashPassword(t, "valid-password")
-				seedUser(t, f.db, withUsername("login-user"), withPasswordHash(passwordHash))
-				return &userSvc.LoginUserIn{Trace: testTrace(), Username: "login-user", Password: "valid-password"}
-			},
+			name:     "issues access and refresh tokens for valid credentials",
+			input:    &userSvc.LoginUserIn{Trace: testTrace(), Username: "login-user", Password: "valid-password"},
 			expected: userServiceLoginUserExpected{success: true},
 		},
 		{
-			name: "rejects unknown username",
-			setup: func(t *testing.T, _ *userFixture) *userSvc.LoginUserIn {
-				return &userSvc.LoginUserIn{Trace: testTrace(), Username: "missing", Password: "valid-password"}
-			},
+			name:     "rejects unknown username",
+			input:    &userSvc.LoginUserIn{Trace: testTrace(), Username: "missing", Password: "valid-password"},
 			expected: userServiceLoginUserExpected{code: http.StatusUnauthorized},
 		},
 		{
-			name: "rejects incorrect password",
-			setup: func(t *testing.T, f *userFixture) *userSvc.LoginUserIn {
-				seedUser(t, f.db, withUsername("login-user"), withPasswordHash(hashPassword(t, "valid-password")))
-				return &userSvc.LoginUserIn{Trace: testTrace(), Username: "login-user", Password: "incorrect"}
-			},
+			name:     "rejects incorrect password",
+			input:    &userSvc.LoginUserIn{Trace: testTrace(), Username: "login-user", Password: "incorrect"},
 			expected: userServiceLoginUserExpected{code: http.StatusUnauthorized},
 		},
 		{
-			name: "does not allow administrator accounts to use public login",
-			setup: func(t *testing.T, f *userFixture) *userSvc.LoginUserIn {
-				seedUser(t, f.db, withUsername("admin"), withRole("Admin"), withPasswordHash(hashPassword(t, "valid-password")))
-				return &userSvc.LoginUserIn{Trace: testTrace(), Username: "admin", Password: "valid-password"}
-			},
+			name:     "does not allow administrator accounts to use public login",
+			input:    &userSvc.LoginUserIn{Trace: testTrace(), Username: "admin", Password: "valid-password"},
 			expected: userServiceLoginUserExpected{code: http.StatusUnauthorized},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newUserFixture(t)
-			got := f.service.LoginUser(context.Background(), tt.setup(t, f))
+			t.Cleanup(func() {
+				if err := f.db.Where("user_id = ?", loginUser.ID).Delete(&model.RefreshToken{}).Error; err != nil {
+					t.Errorf("clean up refresh tokens: %v", err)
+				}
+			})
+			got := f.service.LoginUser(context.Background(), tt.input)
 			assertEqual(t, "LoginUser() success", tt.expected.success, got.Success)
 			assertEqual(t, "LoginUser() error code", tt.expected.code, got.ErrorCode)
 			var count int64
@@ -225,32 +232,36 @@ func TestUserService_Register(t *testing.T) {
 func TestUserService_GetUser(t *testing.T) {
 	t.Parallel()
 
+	f := newUserFixture(t)
+	user := seedUser(t, f.db)
+
+	// GetUser cases:
+	// +------------------+-----------------+
+	// | User ID          | Expected result |
+	// +------------------+-----------------+
+	// | existing user ID | success         |
+	// | 99               | not found       |
+	// +------------------+-----------------+
 	tests := []userServiceGetUserTestCase{
 		{
-			name: "returns existing user",
-			setup: func(t *testing.T, f *userFixture) uint {
-				return seedUser(t, f.db).ID
-			},
+			name:     "returns existing user",
+			input:    &userSvc.GetUserIn{Trace: testTrace(), UserID: user.ID},
 			expected: userServiceGetUserExpected{success: true},
 		},
 		{
-			name: "returns not found for missing user",
-			setup: func(t *testing.T, _ *userFixture) uint {
-				return 99
-			},
+			name:     "returns not found for missing user",
+			input:    &userSvc.GetUserIn{Trace: testTrace(), UserID: 99},
 			expected: userServiceGetUserExpected{code: http.StatusNotFound},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newUserFixture(t)
-			id := tt.setup(t, f)
-			got := f.service.GetUser(context.Background(), &userSvc.GetUserIn{Trace: testTrace(), UserID: id})
+			got := f.service.GetUser(context.Background(), tt.input)
 			assertEqual(t, "GetUser() success", tt.expected.success, got.Success)
 			assertEqual(t, "GetUser() error code", tt.expected.code, got.ErrorCode)
 			if tt.expected.success {
-				assertEqual(t, "GetUser() user ID", id, got.User.ID)
+				assertEqual(t, "GetUser() user ID", tt.input.UserID, got.User.ID)
 			}
 		})
 	}
@@ -334,35 +345,40 @@ func TestUserService_DeleteFcmTokenBulk(t *testing.T) {
 func TestUserService_GetUserFcmToken(t *testing.T) {
 	t.Parallel()
 
+	f := newUserFixture(t)
+	withToken := seedUser(t, f.db)
+	withoutToken := seedUser(t, f.db)
+	seedFCMToken(t, f.db, withToken.ID, "token-1")
+
+	// GetUserFcmToken cases:
+	// +------------------+-----------------+-------------+
+	// | User             | Expected result | Token count |
+	// +------------------+-----------------+-------------+
+	// | with token       | success         | 1           |
+	// | without token    | success         | 0           |
+	// | missing user     | not found       | 0           |
+	// +------------------+-----------------+-------------+
 	tests := []userServiceGetUserFcmTokenTestCase{
 		{
-			name: "returns a user's tokens",
-			setup: func(t *testing.T, f *userFixture) uint {
-				user := seedUser(t, f.db)
-				seedFCMToken(t, f.db, user.ID, "token-1")
-				return user.ID
-			},
+			name:     "returns a user's tokens",
+			input:    &userSvc.GetUserFcmTokenIn{Trace: testTrace(), UserID: withToken.ID},
 			expected: userServiceGetUserFcmTokenExpected{success: true, tokenCount: 1},
 		},
 		{
-			name: "returns an empty list when user has no tokens",
-			setup: func(t *testing.T, f *userFixture) uint {
-				return seedUser(t, f.db).ID
-			},
+			name:     "returns an empty list when user has no tokens",
+			input:    &userSvc.GetUserFcmTokenIn{Trace: testTrace(), UserID: withoutToken.ID},
 			expected: userServiceGetUserFcmTokenExpected{success: true},
 		},
 		{
-			name:  "rejects missing user",
-			setup: func(t *testing.T, _ *userFixture) uint { return 42 }, expected: userServiceGetUserFcmTokenExpected{code: http.StatusNotFound},
+			name:     "rejects missing user",
+			input:    &userSvc.GetUserFcmTokenIn{Trace: testTrace(), UserID: 42},
+			expected: userServiceGetUserFcmTokenExpected{code: http.StatusNotFound},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newUserFixture(t)
-			got := f.service.GetUserFcmToken(context.Background(), &userSvc.GetUserFcmTokenIn{
-				Trace: testTrace(), UserID: tt.setup(t, f),
-			})
+			got := f.service.GetUserFcmToken(context.Background(), tt.input)
 			assertEqual(t, "GetUserFcmToken() success", tt.expected.success, got.Success)
 			assertEqual(t, "GetUserFcmToken() error code", tt.expected.code, got.ErrorCode)
 			if len(got.FcmTokens) != tt.expected.tokenCount {
