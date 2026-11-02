@@ -18,15 +18,8 @@ import (
 	"template-go/util/firebase"
 )
 
-type notificationExpected struct {
-	success     bool
-	errorCode   int
-	userCalls   int
-	sendCalls   int
-	deleteCalls int
-	sendInputs  []notificationSendInput
-}
-
+// notificationSendInput is shared by the test cases below and by the
+// firebaseSDKTestSender helper used to exercise the real Firebase SDK.
 type notificationSendInput struct {
 	title string
 	body  string
@@ -34,46 +27,69 @@ type notificationSendInput struct {
 	token string
 }
 
-type notificationSendResult struct {
-	messageID string
-	err       error
-}
-
-type notificationTestCase struct {
-	name                     string
-	input                    *notificationSvc.SendPushNotificationIn
-	expected                 notificationExpected
-	GetUserFcmTokenMock      *userSvc.GetUserFcmTokenOut
-	DeleteFcmTokenBulkMock   *userSvc.DeleteFcmTokenBulkOut
-	deleteFcmTokenMockTokens []string
-	SendMock                 map[string]notificationSendResult
-	sender                   func(t *testing.T) firebase.Sender
-}
-
 func TestNotificationService_SendPushNotification(t *testing.T) {
 	t.Parallel()
 
-	tests := []notificationTestCase{
+	type sendResult struct {
+		messageID string
+		err       error
+	}
+
+	type expected struct {
+		success     bool
+		errorCode   int
+		userCalls   int
+		sendCalls   int
+		deleteCalls int
+		sendInputs  []notificationSendInput
+	}
+
+	type testCase struct {
+		name                     string
+		input                    *notificationSvc.SendPushNotificationIn
+		expected                 expected
+		GetUserFcmTokenMock      *userSvc.GetUserFcmTokenOut
+		DeleteFcmTokenBulkMock   *userSvc.DeleteFcmTokenBulkOut
+		deleteFcmTokenMockTokens []string
+		SendMock                 map[string]sendResult
+		sender                   func(t *testing.T) firebase.Sender
+	}
+
+	// Test cases:
+	//
+	// +--------------------------------------------+------------------------------+--------+
+	// | Scenario                                    | Condition                    | Code   |
+	// +--------------------------------------------+------------------------------+--------+
+	// | missing title                               | validated before dependencies| 422    |
+	// | missing body                                | validated before dependencies| 422    |
+	// | missing user ID                             | validated before dependencies| 422    |
+	// | user token lookup failure                   | GetUserFcmToken fails         | 404    |
+	// | user with no tokens                         | GetUserFcmToken returns none  | 200    |
+	// | sends to every token, tolerates send errors | 2 tokens, 1 send error        | 200    |
+	// | removes unregistered tokens                 | SDK reports UNREGISTERED      | 200    |
+	// | propagates cleanup failure                   | DeleteFcmTokenBulk fails      | 503    |
+	// +--------------------------------------------+------------------------------+--------+
+	tests := []testCase{
 		{
 			name: "validates required title before dependencies",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 1, Body: "body",
 			},
-			expected: notificationExpected{errorCode: http.StatusUnprocessableEntity},
+			expected: expected{errorCode: http.StatusUnprocessableEntity},
 		},
 		{
 			name: "validates required body before dependencies",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), UserID: 1, Title: "title",
 			},
-			expected: notificationExpected{errorCode: http.StatusUnprocessableEntity},
+			expected: expected{errorCode: http.StatusUnprocessableEntity},
 		},
 		{
 			name: "validates required user ID before dependencies",
 			input: &notificationSvc.SendPushNotificationIn{
 				Trace: testTrace(), Title: "title", Body: "body",
 			},
-			expected: notificationExpected{errorCode: http.StatusUnprocessableEntity},
+			expected: expected{errorCode: http.StatusUnprocessableEntity},
 		},
 		{
 			name: "propagates user token lookup failure",
@@ -83,7 +99,7 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 			GetUserFcmTokenMock: &userSvc.GetUserFcmTokenOut{
 				BaseOut: dto.BaseOut{ErrorCode: http.StatusNotFound, ErrorMessage: "user not found"},
 			},
-			expected: notificationExpected{errorCode: http.StatusNotFound, userCalls: 1},
+			expected: expected{errorCode: http.StatusNotFound, userCalls: 1},
 		},
 		{
 			name: "succeeds when user has no tokens",
@@ -93,7 +109,7 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 			GetUserFcmTokenMock: &userSvc.GetUserFcmTokenOut{
 				BaseOut: dto.BaseOut{Success: true},
 			},
-			expected: notificationExpected{success: true, userCalls: 1},
+			expected: expected{success: true, userCalls: 1},
 		},
 		{
 			name: "sends to every token and treats transient send errors as best effort",
@@ -107,11 +123,11 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 					{FcmToken: "token-2"},
 				},
 			},
-			SendMock: map[string]notificationSendResult{
+			SendMock: map[string]sendResult{
 				"token-1": {err: errors.New("temporary send error")},
 				"token-2": {messageID: "message-id"},
 			},
-			expected: notificationExpected{
+			expected: expected{
 				success: true, userCalls: 1, sendCalls: 2,
 				sendInputs: []notificationSendInput{
 					{title: "title", body: "body", data: map[string]string{"kind": "notice"}, token: "token-1"},
@@ -131,7 +147,7 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 			DeleteFcmTokenBulkMock:   &userSvc.DeleteFcmTokenBulkOut{BaseOut: dto.BaseOut{Success: true}},
 			deleteFcmTokenMockTokens: []string{"unregistered-token"},
 			sender:                   newFirebaseSDKTestSender,
-			expected: notificationExpected{
+			expected: expected{
 				success: true, userCalls: 1, deleteCalls: 1,
 				sendInputs: []notificationSendInput{
 					{title: "title", body: "body", token: "unregistered-token"},
@@ -152,7 +168,7 @@ func TestNotificationService_SendPushNotification(t *testing.T) {
 			},
 			deleteFcmTokenMockTokens: []string{"unregistered-token"},
 			sender:                   newFirebaseSDKTestSender,
-			expected: notificationExpected{
+			expected: expected{
 				errorCode: http.StatusServiceUnavailable, userCalls: 1, deleteCalls: 1,
 				sendInputs: []notificationSendInput{
 					{title: "title", body: "body", token: "unregistered-token"},

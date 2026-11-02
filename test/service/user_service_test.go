@@ -11,76 +11,6 @@ import (
 	userSvc "template-go/modules/user/svc"
 )
 
-type userServiceRegisterExpected struct {
-	success bool
-	code    int
-	users   int64
-}
-
-type userServiceRegisterTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userFixture) *userSvc.UserRegisterIn
-	expected userServiceRegisterExpected
-}
-
-type userServiceGetUserExpected struct {
-	success bool
-	code    int
-}
-
-type userServiceGetUserTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userFixture) uint
-	expected userServiceGetUserExpected
-}
-
-type userServiceInsertFcmTokenExpected struct {
-	success bool
-	code    int
-	tokens  int64
-}
-
-type userServiceInsertFcmTokenTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userFixture) *userSvc.InsertFcmTokenIn
-	expected userServiceInsertFcmTokenExpected
-}
-
-type userServiceDeleteFcmTokenBulkExpected struct {
-	success   bool
-	remaining int64
-}
-
-type userServiceDeleteFcmTokenBulkTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userFixture) []string
-	expected userServiceDeleteFcmTokenBulkExpected
-}
-
-type userServiceGetUserFcmTokenExpected struct {
-	success    bool
-	code       int
-	tokenCount int
-}
-
-type userServiceGetUserFcmTokenTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userFixture) uint
-	expected userServiceGetUserFcmTokenExpected
-}
-
-type userServiceRefreshExpected struct {
-	success bool
-	code    int
-	tokens  int64
-}
-
-type userServiceRefreshTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userFixture) *userSvc.RefreshIn
-	expected userServiceRefreshExpected
-}
-
 func TestUserService_LoginUser(t *testing.T) {
 	t.Parallel()
 
@@ -191,58 +121,69 @@ func TestUserService_LoginUser(t *testing.T) {
 func TestUserService_Register(t *testing.T) {
 	t.Parallel()
 
-	tests := []userServiceRegisterTestCase{
+	type expected struct {
+		success bool
+		code    int
+		users   int64
+	}
+
+	type testCase struct {
+		name     string
+		username string
+		email    string
+		role     string
+		expected expected
+	}
+
+	// Seed data:
+	//
+	// +--------+-----------------------+----------+
+	// | Role   | Username               | Email    |
+	// +--------+-----------------------+----------+
+	// | Member | taken                 | taken@example.test |
+	// +--------+-----------------------+----------+
+	seedSharedData := func(t *testing.T, f *userFixture) {
+		seedRole(t, f.db, "Member")
+		seedUser(t, f.db, withUsername("taken"), withEmail("taken@example.test"))
+	}
+
+	// Test cases:
+	//
+	// +--------------------------+----------------+----------+----------------------+---------+-------+
+	// | Scenario                 | Username       | Email    | Role                 | Success | Users |
+	// +--------------------------+----------------+----------+----------------------+---------+-------+
+	// | existing role            | new-user       | new      | Member               | true    | 2     |
+	// | missing role             | new-user       | new      | Missing              | false   | 1     |
+	// | duplicate username       | taken          | new      | Member               | false   | 1     |
+	// | duplicate email          | new-user       | taken    | Member               | false   | 1     |
+	// +--------------------------+----------------+----------+----------------------+---------+-------+
+	tests := []testCase{
 		{
-			name: "registers user with existing role",
-			setup: func(t *testing.T, f *userFixture) *userSvc.UserRegisterIn {
-				seedRole(t, f.db, "Member")
-				return &userSvc.UserRegisterIn{
-					Trace: testTrace(), Username: "new-user", Email: "new-user@example.test",
-					Password: "password", FullName: "New User", UserRole: "Member",
-				}
-			},
-			expected: userServiceRegisterExpected{success: true, users: 1},
+			name: "registers user with existing role", username: "new-user", email: "new-user@example.test", role: "Member",
+			expected: expected{success: true, users: 2},
 		},
 		{
-			name: "rejects missing role",
-			setup: func(t *testing.T, _ *userFixture) *userSvc.UserRegisterIn {
-				return &userSvc.UserRegisterIn{
-					Trace: testTrace(), Username: "new-user", Email: "new-user@example.test",
-					Password: "password", FullName: "New User", UserRole: "Missing",
-				}
-			},
-			expected: userServiceRegisterExpected{code: http.StatusBadRequest},
+			name: "rejects missing role", username: "new-user", email: "new-user@example.test", role: "Missing",
+			expected: expected{code: http.StatusBadRequest, users: 1},
 		},
 		{
-			name: "rejects duplicate username",
-			setup: func(t *testing.T, f *userFixture) *userSvc.UserRegisterIn {
-				seedRole(t, f.db, "Member")
-				seedUser(t, f.db, withUsername("taken"))
-				return &userSvc.UserRegisterIn{
-					Trace: testTrace(), Username: "taken", Email: "new-user@example.test",
-					Password: "password", FullName: "New User", UserRole: "Member",
-				}
-			},
-			expected: userServiceRegisterExpected{code: http.StatusUnprocessableEntity, users: 1},
+			name: "rejects duplicate username", username: "taken", email: "new-user@example.test", role: "Member",
+			expected: expected{code: http.StatusUnprocessableEntity, users: 1},
 		},
 		{
-			name: "rejects duplicate email without persisting a user",
-			setup: func(t *testing.T, f *userFixture) *userSvc.UserRegisterIn {
-				seedRole(t, f.db, "Member")
-				seedUser(t, f.db, withEmail("taken@example.test"))
-				return &userSvc.UserRegisterIn{
-					Trace: testTrace(), Username: "new-user", Email: "taken@example.test",
-					Password: "password", FullName: "New User", UserRole: "Member",
-				}
-			},
-			expected: userServiceRegisterExpected{code: http.StatusInternalServerError, users: 1},
+			name: "rejects duplicate email without persisting a user", username: "new-user", email: "taken@example.test", role: "Member",
+			expected: expected{code: http.StatusInternalServerError, users: 1},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserFixture(t)
-			got := f.service.Register(context.Background(), tt.setup(t, f))
+			seedSharedData(t, f)
+			got := f.service.Register(context.Background(), &userSvc.UserRegisterIn{
+				Trace: testTrace(), Username: tt.username, Email: tt.email,
+				Password: "password", FullName: "New User", UserRole: tt.role,
+			})
 			assertEqual(t, "Register() success", tt.expected.success, got.Success)
 			assertEqual(t, "Register() error code", tt.expected.code, got.ErrorCode)
 			var count int64
@@ -259,27 +200,45 @@ func TestUserService_Register(t *testing.T) {
 func TestUserService_GetUser(t *testing.T) {
 	t.Parallel()
 
-	tests := []userServiceGetUserTestCase{
-		{
-			name: "returns existing user",
-			setup: func(t *testing.T, f *userFixture) uint {
-				return seedUser(t, f.db).ID
-			},
-			expected: userServiceGetUserExpected{success: true},
-		},
-		{
-			name: "returns not found for missing user",
-			setup: func(t *testing.T, _ *userFixture) uint {
-				return 99
-			},
-			expected: userServiceGetUserExpected{code: http.StatusNotFound},
-		},
+	type expected struct {
+		success bool
+		code    int
+	}
+
+	type testCase struct {
+		name          string
+		useSeededUser bool
+		expected      expected
+	}
+
+	// Seed data: one user is created via seedUser(); its ID is reused
+	// across test cases, since GORM primary keys never use ID 0.
+	var seededID uint
+	seedSharedData := func(t *testing.T, f *userFixture) {
+		seededID = seedUser(t, f.db).ID
+	}
+
+	// Test cases:
+	//
+	// +---------------------+----------------+---------+
+	// | Scenario            | Condition      | Code    |
+	// +---------------------+----------------+---------+
+	// | existing user       | seeded user    | 200     |
+	// | missing user         | unknown ID     | 404     |
+	// +---------------------+----------------+---------+
+	tests := []testCase{
+		{name: "returns existing user", useSeededUser: true, expected: expected{success: true}},
+		{name: "returns not found for missing user", useSeededUser: false, expected: expected{code: http.StatusNotFound}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserFixture(t)
-			id := tt.setup(t, f)
+			seedSharedData(t, f)
+			id := uint(0)
+			if tt.useSeededUser {
+				id = seededID
+			}
 			got := f.service.GetUser(context.Background(), &userSvc.GetUserIn{Trace: testTrace(), UserID: id})
 			assertEqual(t, "GetUser() success", tt.expected.success, got.Success)
 			assertEqual(t, "GetUser() error code", tt.expected.code, got.ErrorCode)
@@ -293,28 +252,47 @@ func TestUserService_GetUser(t *testing.T) {
 func TestUserService_InsertFcmToken(t *testing.T) {
 	t.Parallel()
 
-	tests := []userServiceInsertFcmTokenTestCase{
-		{
-			name: "inserts token for existing user",
-			setup: func(t *testing.T, f *userFixture) *userSvc.InsertFcmTokenIn {
-				user := seedUser(t, f.db)
-				return &userSvc.InsertFcmTokenIn{Trace: testTrace(), UserID: user.ID, Token: "fcm-token"}
-			},
-			expected: userServiceInsertFcmTokenExpected{success: true, tokens: 1},
-		},
-		{
-			name: "rejects missing user",
-			setup: func(t *testing.T, _ *userFixture) *userSvc.InsertFcmTokenIn {
-				return &userSvc.InsertFcmTokenIn{Trace: testTrace(), UserID: 42, Token: "fcm-token"}
-			},
-			expected: userServiceInsertFcmTokenExpected{code: http.StatusNotFound},
-		},
+	type expected struct {
+		success bool
+		code    int
+		tokens  int64
+	}
+
+	type testCase struct {
+		name          string
+		useSeededUser bool
+		expected      expected
+	}
+
+	// Seed data: one user is created via seedUser(); its ID is reused
+	// across test cases.
+	var seededID uint
+	seedSharedData := func(t *testing.T, f *userFixture) {
+		seededID = seedUser(t, f.db).ID
+	}
+
+	// Test cases:
+	//
+	// +---------------------+----------------+---------+--------+
+	// | Scenario            | Condition      | Code    | Tokens |
+	// +---------------------+----------------+---------+--------+
+	// | existing user       | seeded user    | 200     | 1      |
+	// | missing user         | unknown ID     | 404     | 0      |
+	// +---------------------+----------------+---------+--------+
+	tests := []testCase{
+		{name: "inserts token for existing user", useSeededUser: true, expected: expected{success: true, tokens: 1}},
+		{name: "rejects missing user", useSeededUser: false, expected: expected{code: http.StatusNotFound}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserFixture(t)
-			got := f.service.InsertFcmToken(context.Background(), tt.setup(t, f))
+			seedSharedData(t, f)
+			id := uint(0)
+			if tt.useSeededUser {
+				id = seededID
+			}
+			got := f.service.InsertFcmToken(context.Background(), &userSvc.InsertFcmTokenIn{Trace: testTrace(), UserID: id, Token: "fcm-token"})
 			assertEqual(t, "InsertFcmToken() success", tt.expected.success, got.Success)
 			assertEqual(t, "InsertFcmToken() error code", tt.expected.code, got.ErrorCode)
 			var count int64
@@ -331,28 +309,49 @@ func TestUserService_InsertFcmToken(t *testing.T) {
 func TestUserService_DeleteFcmTokenBulk(t *testing.T) {
 	t.Parallel()
 
-	tests := []userServiceDeleteFcmTokenBulkTestCase{
-		{
-			name: "deletes matching tokens only",
-			setup: func(t *testing.T, f *userFixture) []string {
-				user := seedUser(t, f.db)
-				seedFCMToken(t, f.db, user.ID, "remove-me")
-				seedFCMToken(t, f.db, user.ID, "keep-me")
-				return []string{"remove-me"}
-			},
-			expected: userServiceDeleteFcmTokenBulkExpected{success: true, remaining: 1},
-		},
-		{
-			name:  "succeeds with empty token set",
-			setup: func(t *testing.T, _ *userFixture) []string { return nil }, expected: userServiceDeleteFcmTokenBulkExpected{success: true},
-		},
+	type expected struct {
+		success   bool
+		remaining int64
+	}
+
+	type testCase struct {
+		name     string
+		tokens   []string
+		expected expected
+	}
+
+	// Seed data: one user with two FCM tokens.
+	//
+	// +------------+
+	// | Token      |
+	// +------------+
+	// | remove-me  |
+	// | keep-me    |
+	// +------------+
+	seedSharedData := func(t *testing.T, f *userFixture) {
+		user := seedUser(t, f.db)
+		seedFCMToken(t, f.db, user.ID, "remove-me")
+		seedFCMToken(t, f.db, user.ID, "keep-me")
+	}
+
+	// Test cases:
+	//
+	// +--------------------------+---------------------------+-----------+
+	// | Scenario                 | Tokens requested           | Remaining |
+	// +--------------------------+---------------------------+-----------+
+	// | matching tokens          | remove-me                 | 1         |
+	// | empty token set          | (none)                     | 2         |
+	// +--------------------------+---------------------------+-----------+
+	tests := []testCase{
+		{name: "deletes matching tokens only", tokens: []string{"remove-me"}, expected: expected{success: true, remaining: 1}},
+		{name: "succeeds with empty token set", tokens: nil, expected: expected{success: true, remaining: 2}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserFixture(t)
-			input := &userSvc.DeleteFcmTokenBulkIn{Trace: testTrace(), Tokens: tt.setup(t, f)}
-			got := f.service.DeleteFcmTokenBulk(context.Background(), input)
+			seedSharedData(t, f)
+			got := f.service.DeleteFcmTokenBulk(context.Background(), &userSvc.DeleteFcmTokenBulkIn{Trace: testTrace(), Tokens: tt.tokens})
 			assertEqual(t, "DeleteFcmTokenBulk() success", tt.expected.success, got.Success)
 			var count int64
 			if err := f.db.Model(&model.FcmToken{}).Count(&count).Error; err != nil {
@@ -368,35 +367,58 @@ func TestUserService_DeleteFcmTokenBulk(t *testing.T) {
 func TestUserService_GetUserFcmToken(t *testing.T) {
 	t.Parallel()
 
-	tests := []userServiceGetUserFcmTokenTestCase{
-		{
-			name: "returns a user's tokens",
-			setup: func(t *testing.T, f *userFixture) uint {
-				user := seedUser(t, f.db)
-				seedFCMToken(t, f.db, user.ID, "token-1")
-				return user.ID
-			},
-			expected: userServiceGetUserFcmTokenExpected{success: true, tokenCount: 1},
-		},
-		{
-			name: "returns an empty list when user has no tokens",
-			setup: func(t *testing.T, f *userFixture) uint {
-				return seedUser(t, f.db).ID
-			},
-			expected: userServiceGetUserFcmTokenExpected{success: true},
-		},
-		{
-			name:  "rejects missing user",
-			setup: func(t *testing.T, _ *userFixture) uint { return 42 }, expected: userServiceGetUserFcmTokenExpected{code: http.StatusNotFound},
-		},
+	type expected struct {
+		success    bool
+		code       int
+		tokenCount int
+	}
+
+	type testCase struct {
+		name      string
+		userIndex int // -1 = missing user (sentinel ID), 0/1 = index into seeded users
+		expected  expected
+	}
+
+	// Seed data: two users.
+	//
+	// +-------+------------+
+	// | Index | FCM Tokens |
+	// +-------+------------+
+	// | 0     | token-1    |
+	// | 1     | (none)     |
+	// +-------+------------+
+	var seededIDs [2]uint
+	seedSharedData := func(t *testing.T, f *userFixture) {
+		withToken := seedUser(t, f.db)
+		seedFCMToken(t, f.db, withToken.ID, "token-1")
+		withoutToken := seedUser(t, f.db)
+		seededIDs = [2]uint{withToken.ID, withoutToken.ID}
+	}
+
+	// Test cases:
+	//
+	// +---------------------+------------------------+--------+-------+
+	// | Scenario            | User                     | Code   | Count |
+	// +---------------------+------------------------+--------+-------+
+	// | has tokens          | index 0 (token-1)        | 200    | 1     |
+	// | no tokens           | index 1 (no tokens)      | 200    | 0     |
+	// | missing user        | sentinel ID              | 404    | 0     |
+	// +---------------------+------------------------+--------+-------+
+	tests := []testCase{
+		{name: "returns a user's tokens", userIndex: 0, expected: expected{success: true, tokenCount: 1}},
+		{name: "returns an empty list when user has no tokens", userIndex: 1, expected: expected{success: true}},
+		{name: "rejects missing user", userIndex: -1, expected: expected{code: http.StatusNotFound}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserFixture(t)
-			got := f.service.GetUserFcmToken(context.Background(), &userSvc.GetUserFcmTokenIn{
-				Trace: testTrace(), UserID: tt.setup(t, f),
-			})
+			seedSharedData(t, f)
+			id := uint(0)
+			if tt.userIndex >= 0 {
+				id = seededIDs[tt.userIndex]
+			}
+			got := f.service.GetUserFcmToken(context.Background(), &userSvc.GetUserFcmTokenIn{Trace: testTrace(), UserID: id})
 			assertEqual(t, "GetUserFcmToken() success", tt.expected.success, got.Success)
 			assertEqual(t, "GetUserFcmToken() error code", tt.expected.code, got.ErrorCode)
 			if len(got.FcmTokens) != tt.expected.tokenCount {
@@ -409,50 +431,66 @@ func TestUserService_GetUserFcmToken(t *testing.T) {
 func TestUserService_Refresh(t *testing.T) {
 	t.Parallel()
 
-	tests := []userServiceRefreshTestCase{
-		{
-			name: "rotates a valid refresh token",
-			setup: func(t *testing.T, f *userFixture) *userSvc.RefreshIn {
-				user := seedUser(t, f.db)
-				seedRefreshToken(t, f.db, user.ID, "old-token", "family", time.Now().Add(time.Hour), nil)
-				return &userSvc.RefreshIn{Trace: testTrace(), UserId: int(user.ID), RefreshToken: "old-token"}
-			},
-			expected: userServiceRefreshExpected{success: true, tokens: 2},
-		},
-		{
-			name: "rejects missing refresh token",
-			setup: func(t *testing.T, f *userFixture) *userSvc.RefreshIn {
-				user := seedUser(t, f.db)
-				return &userSvc.RefreshIn{Trace: testTrace(), UserId: int(user.ID), RefreshToken: "missing"}
-			},
-			expected: userServiceRefreshExpected{code: http.StatusNotFound},
-		},
-		{
-			name: "rejects expired refresh token",
-			setup: func(t *testing.T, f *userFixture) *userSvc.RefreshIn {
-				user := seedUser(t, f.db)
-				seedRefreshToken(t, f.db, user.ID, "expired", "family", time.Now().Add(-time.Hour), nil)
-				return &userSvc.RefreshIn{Trace: testTrace(), UserId: int(user.ID), RefreshToken: "expired"}
-			},
-			expected: userServiceRefreshExpected{code: http.StatusForbidden, tokens: 1},
-		},
-		{
-			name: "revokes a token family when a consumed token is reused",
-			setup: func(t *testing.T, f *userFixture) *userSvc.RefreshIn {
-				user := seedUser(t, f.db)
-				usedAt := time.Now().Add(-time.Minute)
-				seedRefreshToken(t, f.db, user.ID, "reused", "family", time.Now().Add(time.Hour), &usedAt)
-				seedRefreshToken(t, f.db, user.ID, "sibling", "family", time.Now().Add(time.Hour), nil)
-				return &userSvc.RefreshIn{Trace: testTrace(), UserId: int(user.ID), RefreshToken: "reused"}
-			},
-			expected: userServiceRefreshExpected{code: http.StatusForbidden, tokens: 2},
-		},
+	type expected struct {
+		success bool
+		code    int
+		tokens  int64
+	}
+
+	type testCase struct {
+		name         string
+		refreshToken string
+		expected     expected
+	}
+
+	// Seed data: one user with four refresh tokens in distinct states.
+	// "reused" and "sibling" share a family so reuse-revocation can be
+	// observed; other tokens use distinct families to avoid cross-case
+	// revocation interference.
+	//
+	// +-------------+----------------+------------+--------+
+	// | Raw Token   | Family         | Expires     | Used   |
+	// +-------------+----------------+------------+--------+
+	// | old-token   | family-valid   | +1h         | no     |
+	// | expired     | family-expired | -1h         | no     |
+	// | reused      | family-reused  | +1h         | yes    |
+	// | sibling     | family-reused  | +1h         | no     |
+	// +-------------+----------------+------------+--------+
+	var seededUserID uint
+	seedSharedData := func(t *testing.T, f *userFixture) {
+		user := seedUser(t, f.db)
+		seededUserID = user.ID
+		seedRefreshToken(t, f.db, user.ID, "old-token", "family-valid", time.Now().Add(time.Hour), nil)
+		seedRefreshToken(t, f.db, user.ID, "expired", "family-expired", time.Now().Add(-time.Hour), nil)
+		usedAt := time.Now().Add(-time.Minute)
+		seedRefreshToken(t, f.db, user.ID, "reused", "family-reused", time.Now().Add(time.Hour), &usedAt)
+		seedRefreshToken(t, f.db, user.ID, "sibling", "family-reused", time.Now().Add(time.Hour), nil)
+	}
+
+	// Test cases:
+	//
+	// +--------------------------------+---------------------------+--------+--------+
+	// | Scenario                       | Refresh Token               | Code   | Tokens |
+	// +--------------------------------+---------------------------+--------+--------+
+	// | valid refresh token            | old-token                   | 200    | 5      |
+	// | missing refresh token          | missing                     | 404    | 4      |
+	// | expired refresh token          | expired                     | 403    | 4      |
+	// | reused consumed token          | reused                      | 403    | 4      |
+	// +--------------------------------+---------------------------+--------+--------+
+	tests := []testCase{
+		{name: "rotates a valid refresh token", refreshToken: "old-token", expected: expected{success: true, tokens: 5}},
+		{name: "rejects missing refresh token", refreshToken: "missing", expected: expected{code: http.StatusNotFound, tokens: 4}},
+		{name: "rejects expired refresh token", refreshToken: "expired", expected: expected{code: http.StatusForbidden, tokens: 4}},
+		{name: "revokes a token family when a consumed token is reused", refreshToken: "reused", expected: expected{code: http.StatusForbidden, tokens: 4}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newUserFixture(t)
-			got := f.service.Refresh(context.Background(), tt.setup(t, f))
+			seedSharedData(t, f)
+			got := f.service.Refresh(context.Background(), &userSvc.RefreshIn{
+				Trace: testTrace(), UserId: int(seededUserID), RefreshToken: tt.refreshToken,
+			})
 			assertEqual(t, "Refresh() success", tt.expected.success, got.Success)
 			assertEqual(t, "Refresh() error code", tt.expected.code, got.ErrorCode)
 			var count int64
