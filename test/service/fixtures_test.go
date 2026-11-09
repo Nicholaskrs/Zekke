@@ -147,6 +147,47 @@ func seedUserWithData(t *testing.T, db *gorm.DB, data userSeedData) *model.User 
 	return seedUser(t, db, opts...)
 }
 
+// userRow describes a single seeded user row for seedUsers. Fields left at
+// their zero value fall back to the defaults applied by seedUser.
+type userRow struct {
+	Username     string
+	Email        string
+	Role         string
+	PasswordHash string
+	DeletedAt    *time.Time
+}
+
+// seedUsers seeds one user row per entry, in order, and returns the created
+// users in the same order so callers can reference them (e.g. by index) in
+// their test cases.
+func seedUsers(t *testing.T, db *gorm.DB, rows ...userRow) []*model.User {
+	t.Helper()
+	users := make([]*model.User, 0, len(rows))
+	for _, row := range rows {
+		var opts []userSeedOption
+		if row.Username != "" {
+			opts = append(opts, withUsername(row.Username))
+		}
+		if row.Email != "" {
+			opts = append(opts, withEmail(row.Email))
+		}
+		if row.Role != "" {
+			opts = append(opts, withRole(row.Role))
+		}
+		if row.PasswordHash != "" {
+			opts = append(opts, withPasswordHash(row.PasswordHash))
+		}
+		user := seedUser(t, db, opts...)
+		if row.DeletedAt != nil {
+			if err := db.Model(user).Update("deleted_at", *row.DeletedAt).Error; err != nil {
+				t.Fatalf("mark user deleted: %v", err)
+			}
+		}
+		users = append(users, user)
+	}
+	return users
+}
+
 func seedRole(t *testing.T, db *gorm.DB, code string) *model.Role {
 	t.Helper()
 	role := &model.Role{Code: code, Description: code + " role"}
@@ -198,6 +239,23 @@ func seedFCMToken(t *testing.T, db *gorm.DB, userID uint, token string) *model.F
 	return fcmToken
 }
 
+// fcmTokenRow describes a single seeded FCM token for seedFCMTokens.
+type fcmTokenRow struct {
+	UserID uint
+	Token  string
+}
+
+// seedFCMTokens seeds one FCM token row per entry, in order, so a batch of
+// tokens for one or more users can be declared as a single readable table.
+func seedFCMTokens(t *testing.T, db *gorm.DB, rows ...fcmTokenRow) []*model.FcmToken {
+	t.Helper()
+	tokens := make([]*model.FcmToken, 0, len(rows))
+	for _, row := range rows {
+		tokens = append(tokens, seedFCMToken(t, db, row.UserID, row.Token))
+	}
+	return tokens
+}
+
 func seedRefreshToken(t *testing.T, db *gorm.DB, userID uint, rawToken, familyID string, expireAt time.Time, usedAt *time.Time) *model.RefreshToken {
 	t.Helper()
 	now := time.Now()
@@ -216,4 +274,26 @@ func seedRefreshToken(t *testing.T, db *gorm.DB, userID uint, rawToken, familyID
 		t.Fatalf("seed refresh token: %v", err)
 	}
 	return token
+}
+
+// refreshTokenRow describes a single seeded refresh token for
+// seedRefreshTokens.
+type refreshTokenRow struct {
+	UserID   uint
+	Token    string
+	Family   string
+	ExpireAt time.Time
+	UsedAt   *time.Time
+}
+
+// seedRefreshTokens seeds one refresh token row per entry, in order, so a
+// family of related tokens can be declared as a single readable table
+// instead of a sequence of individual seedRefreshToken calls.
+func seedRefreshTokens(t *testing.T, db *gorm.DB, rows ...refreshTokenRow) []*model.RefreshToken {
+	t.Helper()
+	tokens := make([]*model.RefreshToken, 0, len(rows))
+	for _, row := range rows {
+		tokens = append(tokens, seedRefreshToken(t, db, row.UserID, row.Token, row.Family, row.ExpireAt, row.UsedAt))
+	}
+	return tokens
 }

@@ -320,7 +320,8 @@ func TestUserService_DeleteFcmTokenBulk(t *testing.T) {
 		expected expected
 	}
 
-	// Seed data: one user with two FCM tokens.
+	// {{User table}} and {{FcmToken table}}: one user with two FCM
+	// tokens.
 	//
 	// +------------+
 	// | Token      |
@@ -330,8 +331,10 @@ func TestUserService_DeleteFcmTokenBulk(t *testing.T) {
 	// +------------+
 	seedSharedData := func(t *testing.T, f *userFixture) {
 		user := seedUser(t, f.db)
-		seedFCMToken(t, f.db, user.ID, "remove-me")
-		seedFCMToken(t, f.db, user.ID, "keep-me")
+		seedFCMTokens(t, f.db,
+			fcmTokenRow{UserID: user.ID, Token: "remove-me"},
+			fcmTokenRow{UserID: user.ID, Token: "keep-me"},
+		)
 	}
 
 	// Test cases:
@@ -458,13 +461,18 @@ func TestUserService_Refresh(t *testing.T) {
 	// +-------------+----------------+------------+--------+
 	var seededUserID uint
 	seedSharedData := func(t *testing.T, f *userFixture) {
+		// {{User table}}
 		user := seedUser(t, f.db)
 		seededUserID = user.ID
-		seedRefreshToken(t, f.db, user.ID, "old-token", "family-valid", time.Now().Add(time.Hour), nil)
-		seedRefreshToken(t, f.db, user.ID, "expired", "family-expired", time.Now().Add(-time.Hour), nil)
+
+		// {{RefreshToken table}}
 		usedAt := time.Now().Add(-time.Minute)
-		seedRefreshToken(t, f.db, user.ID, "reused", "family-reused", time.Now().Add(time.Hour), &usedAt)
-		seedRefreshToken(t, f.db, user.ID, "sibling", "family-reused", time.Now().Add(time.Hour), nil)
+		seedRefreshTokens(t, f.db,
+			refreshTokenRow{UserID: user.ID, Token: "old-token", Family: "family-valid", ExpireAt: time.Now().Add(time.Hour)},
+			refreshTokenRow{UserID: user.ID, Token: "expired", Family: "family-expired", ExpireAt: time.Now().Add(-time.Hour)},
+			refreshTokenRow{UserID: user.ID, Token: "reused", Family: "family-reused", ExpireAt: time.Now().Add(time.Hour), UsedAt: &usedAt},
+			refreshTokenRow{UserID: user.ID, Token: "sibling", Family: "family-reused", ExpireAt: time.Now().Add(time.Hour)},
+		)
 	}
 
 	// Test cases:

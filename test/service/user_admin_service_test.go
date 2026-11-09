@@ -113,14 +113,12 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 	}
 
 	type testCase struct {
-		name                string
-		permissionSuccess   bool
-		permissionAllowed   bool
-		permissionErrorCode int
-		expected            expected
+		name            string
+		hasPrivilegeOut *permissionSvc.HasPrivilegeOut
+		expected        expected
 	}
 
-	// Seed data: one active user and one soft-deleted user.
+	// {{User table}}: one active user and one soft-deleted user.
 	//
 	// +----------+------------+
 	// | Username | Deleted    |
@@ -129,35 +127,37 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 	// | deleted  | yes        |
 	// +----------+------------+
 	seedSharedData := func(t *testing.T, f *userAdminFixture) {
-		seedUser(t, f.db, withUsername("active"))
 		deletedAt := time.Now()
-		deleted := seedUser(t, f.db, withUsername("deleted"))
-		if err := f.db.Model(deleted).Update("deleted_at", deletedAt).Error; err != nil {
-			t.Fatal(err)
-		}
+		seedUsers(t, f.db,
+			userRow{Username: "active"},
+			userRow{Username: "deleted", DeletedAt: &deletedAt},
+		)
 	}
 
 	// Test cases:
 	//
-	// +--------------------------+--------------------+----------+---------+-------+-----------+
-	// | Scenario                 | Permission Result   | Allowed  | Code    | Users | TotalRows |
-	// +--------------------------+--------------------+----------+---------+-------+-----------+
-	// | active users, allowed    | success             | true     | success | 1     | 1         |
-	// | permission denied        | success             | false    | 403     | 0     | 0         |
-	// | permission service error | 503 error           | -        | 503     | 0     | 0         |
-	// +--------------------------+--------------------+----------+---------+-------+-----------+
+	// +--------------------------+------------------------------------------------------------+---------+-------+-----------+
+	// | Scenario                 | HasPrivilegeOut                                             | Code    | Users | TotalRows |
+	// +--------------------------+------------------------------------------------------------+---------+-------+-----------+
+	// | active users, allowed    | {Success: true, IsAllowed: true}                            | success | 1     | 1         |
+	// | permission denied        | {Success: true, IsAllowed: false}                           | 403     | 0     | 0         |
+	// | permission service error | {ErrorCode: 503}                                            | 503     | 0     | 0         |
+	// +--------------------------+------------------------------------------------------------+---------+-------+-----------+
 	tests := []testCase{
 		{
-			name: "returns active users and count", permissionSuccess: true, permissionAllowed: true,
-			expected: expected{success: true, users: 1, totalRows: 1},
+			name:            "returns active users and count",
+			hasPrivilegeOut: &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: true},
+			expected:        expected{success: true, users: 1, totalRows: 1},
 		},
 		{
-			name: "rejects denied permission", permissionSuccess: true,
-			expected: expected{code: http.StatusForbidden},
+			name:            "rejects denied permission",
+			hasPrivilegeOut: &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: false},
+			expected:        expected{code: http.StatusForbidden},
 		},
 		{
-			name: "propagates permission service error", permissionErrorCode: http.StatusServiceUnavailable,
-			expected: expected{code: http.StatusServiceUnavailable},
+			name:            "propagates permission service error",
+			hasPrivilegeOut: &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "permission failure"}},
+			expected:        expected{code: http.StatusServiceUnavailable},
 		},
 	}
 
@@ -166,10 +166,7 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 			f := newUserAdminFixture(t)
 			seedSharedData(t, f)
 			f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-				if tt.permissionSuccess {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: tt.permissionAllowed}
-				}
-				return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: tt.permissionErrorCode, ErrorMessage: "permission failure"}}
+				return tt.hasPrivilegeOut
 			}
 			got := f.service.FilterUser(context.Background(), &userSvc.AdminFilterUserIn{
 				Trace: testTrace(), PaginateIn: dto.PaginateIn{Page: 1, Limit: 10},
@@ -197,15 +194,14 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 	}
 
 	type testCase struct {
-		name                string
-		target              string // "seeded", "missing", "zero"
-		permissionSuccess   bool
-		permissionAllowed   bool
-		permissionErrorCode int
-		expected            expected
+		name            string
+		target          string // "seeded", "missing", "zero"
+		hasPrivilegeOut *permissionSvc.HasPrivilegeOut
+		expected        expected
 	}
 
-	// Seed data: one user with one active refresh token.
+	// {{User table}} and {{RefreshToken table}}: one user with one
+	// active refresh token.
 	//
 	// +--------------------+--------------+--------+
 	// | Raw Token          | Family       | Expires|
@@ -225,35 +221,35 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 
 	// Test cases:
 	//
-	// +---------------------------------------+---------+--------------------+----------+---------+-------------+----------+
-	// | Scenario                               | Target  | Permission Result  | Allowed  | Code    | ActiveUsers | PrivCall |
-	// +---------------------------------------+---------+--------------------+----------+---------+-------------+----------+
-	// | authorized soft-delete                 | seeded  | success            | true     | success | 0           | 1        |
-	// | denied permission                      | seeded  | success            | false    | 403     | 1           | 1        |
-	// | permission dependency failure           | seeded  | 503 error          | -        | 503     | 1           | 1        |
-	// | missing target user                    | missing | success            | true     | 404     | 1           | 1        |
-	// | zero target ID (no permission check)   | zero    | -                  | -        | 400     | 1           | 0        |
-	// +---------------------------------------+---------+--------------------+----------+---------+-------------+----------+
+	// +---------------------------------------+---------+----------------------------------------+---------+-------------+----------+
+	// | Scenario                               | Target  | HasPrivilegeOut                        | Code    | ActiveUsers | PrivCall |
+	// +---------------------------------------+---------+----------------------------------------+---------+-------------+----------+
+	// | authorized soft-delete                 | seeded  | {Success: true, IsAllowed: true}       | success | 0           | 1        |
+	// | denied permission                      | seeded  | {Success: true, IsAllowed: false}      | 403     | 1           | 1        |
+	// | permission dependency failure           | seeded  | {ErrorCode: 503}                       | 503     | 1           | 1        |
+	// | missing target user                    | missing | {Success: true, IsAllowed: true}       | 404     | 1           | 1        |
+	// | zero target ID (no permission check)   | zero    | (not called)                           | 400     | 1           | 0        |
+	// +---------------------------------------+---------+----------------------------------------+---------+-------------+----------+
 	tests := []testCase{
 		{
 			name: "soft-deletes target user when authorized", target: "seeded",
-			permissionSuccess: true, permissionAllowed: true,
-			expected: expected{success: true, activeUsers: 0, privilegeCall: 1},
+			hasPrivilegeOut: &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: true},
+			expected:        expected{success: true, activeUsers: 0, privilegeCall: 1},
 		},
 		{
 			name: "does not modify users when denied", target: "seeded",
-			permissionSuccess: true,
-			expected:          expected{code: http.StatusForbidden, activeUsers: 1, privilegeCall: 1},
+			hasPrivilegeOut: &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: false},
+			expected:        expected{code: http.StatusForbidden, activeUsers: 1, privilegeCall: 1},
 		},
 		{
 			name: "propagates permission dependency failure", target: "seeded",
-			permissionErrorCode: http.StatusServiceUnavailable,
-			expected:            expected{code: http.StatusServiceUnavailable, activeUsers: 1, privilegeCall: 1},
+			hasPrivilegeOut: &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "permission unavailable"}},
+			expected:        expected{code: http.StatusServiceUnavailable, activeUsers: 1, privilegeCall: 1},
 		},
 		{
 			name: "returns not found for missing target", target: "missing",
-			permissionSuccess: true, permissionAllowed: true,
-			expected: expected{code: http.StatusNotFound, activeUsers: 1, privilegeCall: 1},
+			hasPrivilegeOut: &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: true},
+			expected:        expected{code: http.StatusNotFound, activeUsers: 1, privilegeCall: 1},
 		},
 		{
 			name: "rejects zero target ID without checking permission", target: "zero",
@@ -266,10 +262,7 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 			f := newUserAdminFixture(t)
 			seedSharedData(t, f)
 			f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-				if tt.permissionSuccess {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: tt.permissionAllowed}
-				}
-				return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: tt.permissionErrorCode, ErrorMessage: "permission unavailable"}}
+				return tt.hasPrivilegeOut
 			}
 			var userID int
 			switch tt.target {
@@ -339,14 +332,21 @@ func TestUserAdminService_Refresh(t *testing.T) {
 	// +-----------------+----------------+--------+--------+
 	var seededUserID uint
 	seedSharedData := func(t *testing.T, f *userAdminFixture) {
+		// {{User table}}
 		user := seedUser(t, f.db, withRole("Admin"))
 		seededUserID = user.ID
+
+		// {{UserPrivilegeGroup table}}
 		seedUserPrivilegeGroup(t, f.db, user.ID, "Root")
-		seedRefreshToken(t, f.db, user.ID, "old-admin-token", "admin-family", time.Now().Add(time.Hour), nil)
-		seedRefreshToken(t, f.db, user.ID, "expired-admin", "expired-family", time.Now().Add(-time.Hour), nil)
+
+		// {{RefreshToken table}}
 		usedAt := time.Now().Add(-time.Minute)
-		seedRefreshToken(t, f.db, user.ID, "used-admin", "reused-family", time.Now().Add(time.Hour), &usedAt)
-		seedRefreshToken(t, f.db, user.ID, "sibling-admin", "reused-family", time.Now().Add(time.Hour), nil)
+		seedRefreshTokens(t, f.db,
+			refreshTokenRow{UserID: user.ID, Token: "old-admin-token", Family: "admin-family", ExpireAt: time.Now().Add(time.Hour)},
+			refreshTokenRow{UserID: user.ID, Token: "expired-admin", Family: "expired-family", ExpireAt: time.Now().Add(-time.Hour)},
+			refreshTokenRow{UserID: user.ID, Token: "used-admin", Family: "reused-family", ExpireAt: time.Now().Add(time.Hour), UsedAt: &usedAt},
+			refreshTokenRow{UserID: user.ID, Token: "sibling-admin", Family: "reused-family", ExpireAt: time.Now().Add(time.Hour)},
+		)
 	}
 
 	// Test cases:
@@ -405,13 +405,11 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 	}
 
 	type testCase struct {
-		name                string
-		useSeededID         bool
-		oldPassword         string
-		newPassword         string
-		permissionSuccess   bool
-		permissionErrorCode int
-		expected            expected
+		name          string
+		useSeededID   bool
+		input         *userSvc.AdminChangePasswordIn
+		permissionOut *permissionSvc.GetAdminGroupPrivilegeOut
+		expected      expected
 	}
 
 	// Seed data: one administrator user with a known old password and
@@ -431,33 +429,35 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 
 	// Test cases:
 	//
-	// +-----------------------------------------+-------------+-------------+--------------+--------------------+---------+-----------------+
-	// | Scenario                                 | UseSeededID | OldPassword | NewPassword  | Permission Result  | Code    | StoredPassword  |
-	// +-----------------------------------------+-------------+-------------+--------------+--------------------+---------+-----------------+
-	// | valid old password                       | yes         | old-password| new-password | success            | success | new-password    |
-	// | incorrect old password                   | yes         | wrong       | new-password | (not called)       | 400     | old-password    |
-	// | permission lookup failure (rolls back)   | yes         | old-password| new-password | 503 error          | 503     | old-password    |
-	// | missing required ID                      | no          | old         | new          | (not called)       | 400     |                 |
-	// +-----------------------------------------+-------------+-------------+--------------+--------------------+---------+-----------------+
+	// +-----------------------------------------+-------------+----------------------------------------+--------------------------+---------+-----------------+
+	// | Scenario                                 | UseSeededID | Input (OldPassword/NewPassword)         | GetAdminGroupPrivilegeOut | Code    | StoredPassword  |
+	// +-----------------------------------------+-------------+----------------------------------------+--------------------------+---------+-----------------+
+	// | valid old password                       | yes         | old-password/new-password               | {Success: true}           | success | new-password    |
+	// | incorrect old password                   | yes         | wrong/new-password                      | (not called)              | 400     | old-password    |
+	// | permission lookup failure (rolls back)   | yes         | old-password/new-password               | {ErrorCode: 503}          | 503     | old-password    |
+	// | missing required ID                      | no          | old/new                                 | (not called)              | 400     |                 |
+	// +-----------------------------------------+-------------+----------------------------------------+--------------------------+---------+-----------------+
 	tests := []testCase{
 		{
 			name: "updates password and issues a new refresh token", useSeededID: true,
-			oldPassword: "old-password", newPassword: "new-password", permissionSuccess: true,
-			expected: expected{success: true, storedPassword: "new-password"},
+			input:         &userSvc.AdminChangePasswordIn{OldPassword: "old-password", NewPassword: "new-password"},
+			permissionOut: &permissionSvc.GetAdminGroupPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, AdminPrivilegeGroup: "Root"},
+			expected:      expected{success: true, storedPassword: "new-password"},
 		},
 		{
 			name: "rejects incorrect old password without changing data", useSeededID: true,
-			oldPassword: "wrong", newPassword: "new-password",
+			input:    &userSvc.AdminChangePasswordIn{OldPassword: "wrong", NewPassword: "new-password"},
 			expected: expected{code: http.StatusBadRequest, storedPassword: "old-password"},
 		},
 		{
 			name: "rolls back password update if permission lookup fails", useSeededID: true,
-			oldPassword: "old-password", newPassword: "new-password", permissionErrorCode: http.StatusServiceUnavailable,
-			expected: expected{code: http.StatusServiceUnavailable, storedPassword: "old-password"},
+			input:         &userSvc.AdminChangePasswordIn{OldPassword: "old-password", NewPassword: "new-password"},
+			permissionOut: &permissionSvc.GetAdminGroupPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "permission unavailable"}},
+			expected:      expected{code: http.StatusServiceUnavailable, storedPassword: "old-password"},
 		},
 		{
 			name: "validates required ID", useSeededID: false,
-			oldPassword: "old", newPassword: "new",
+			input:    &userSvc.AdminChangePasswordIn{OldPassword: "old", NewPassword: "new"},
 			expected: expected{code: http.StatusBadRequest},
 		},
 	}
@@ -467,17 +467,12 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 			f := newUserAdminFixture(t)
 			seedSharedData(t, f)
 			f.permissionMock.GetAdminGroupPrivilegeFunc = func(context.Context, *permissionSvc.GetAdminGroupPrivilegeIn) *permissionSvc.GetAdminGroupPrivilegeOut {
-				if tt.permissionSuccess {
-					return &permissionSvc.GetAdminGroupPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, AdminPrivilegeGroup: "Root"}
-				}
-				return &permissionSvc.GetAdminGroupPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: tt.permissionErrorCode, ErrorMessage: "permission unavailable"}}
+				return tt.permissionOut
 			}
-			userAdminID := 0
+			input := tt.input
+			input.Trace = testTrace()
 			if tt.useSeededID {
-				userAdminID = int(seededUserID)
-			}
-			input := &userSvc.AdminChangePasswordIn{
-				Trace: testTrace(), UserAdminId: userAdminID, OldPassword: tt.oldPassword, NewPassword: tt.newPassword,
+				input.UserAdminId = int(seededUserID)
 			}
 			got := f.service.ChangeAdminPassword(context.Background(), input)
 			assertEqual(t, "ChangeAdminPassword() success", tt.expected.success, got.Success)
