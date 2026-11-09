@@ -320,8 +320,7 @@ func TestUserService_DeleteFcmTokenBulk(t *testing.T) {
 		expected expected
 	}
 
-	// {{User table}} and {{FcmToken table}}: one user with two FCM
-	// tokens.
+	// Seed data: one user with two FCM tokens.
 	//
 	// +------------+
 	// | Token      |
@@ -461,11 +460,11 @@ func TestUserService_Refresh(t *testing.T) {
 	// +-------------+----------------+------------+--------+
 	var seededUserID uint
 	seedSharedData := func(t *testing.T, f *userFixture) {
-		// {{User table}}
+		// Users table: one user.
 		user := seedUser(t, f.db)
 		seededUserID = user.ID
 
-		// {{RefreshToken table}}
+		// RefreshTokens table (see above):
 		usedAt := time.Now().Add(-time.Minute)
 		seedRefreshTokens(t, f.db,
 			refreshTokenRow{UserID: user.ID, Token: "old-token", Family: "family-valid", ExpireAt: time.Now().Add(time.Hour)},

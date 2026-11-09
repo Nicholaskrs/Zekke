@@ -23,12 +23,10 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 	}
 
 	type testCase struct {
-		name                string
-		username            string
-		password            string
-		permissionSuccess   bool
-		permissionErrorCode int
-		expected            expected
+		name          string
+		input         *userSvc.LoginUserAdminIn
+		permissionOut *permissionSvc.GetAdminGroupPrivilegeOut
+		expected      expected
 	}
 
 	// Seed data: two users, an administrator and a regular user, both
@@ -48,27 +46,33 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 
 	// Test cases:
 	//
-	// +---------------------------------+----------+----------+--------------------+---------+--------+
-	// | Scenario                        | Username | Password | Permission Result  | Code    | Tokens |
-	// +---------------------------------+----------+----------+--------------------+---------+--------+
-	// | valid administrator credentials | admin    | correct  | success/"Root"     | success | 1      |
-	// | non-administrator account       | regular  | correct  | (not called)       | 401     | 0      |
-	// | permission service failure      | admin    | correct  | 503 error          | 503     | 0      |
-	// +---------------------------------+----------+----------+--------------------+---------+--------+
+	// +---------------------------------+----------+----------+------------------------------------------------+---------+--------+
+	// | Scenario                        | Username | Password | GetAdminGroupPrivilegeOut                       | Code    | Tokens |
+	// +---------------------------------+----------+----------+------------------------------------------------+---------+--------+
+	// | valid administrator credentials | admin    | correct  | {Success: true, AdminPrivilegeGroup: "Root"}    | success | 1      |
+	// | non-administrator account       | regular  | correct  | (not called)                                    | 401     | 0      |
+	// | permission service failure      | admin    | correct  | {ErrorCode: 503}                                | 503     | 0      |
+	// +---------------------------------+----------+----------+------------------------------------------------+---------+--------+
 	tests := []testCase{
 		{
-			name:     "issues tokens for valid administrator credentials",
-			username: "admin", password: "correct", permissionSuccess: true,
+			name:  "issues tokens for valid administrator credentials",
+			input: &userSvc.LoginUserAdminIn{Username: "admin", Password: "correct"},
+			permissionOut: &permissionSvc.GetAdminGroupPrivilegeOut{
+				BaseOut: dto.BaseOut{Success: true}, AdminPrivilegeGroup: "Root",
+			},
 			expected: expected{success: true, tokens: 1},
 		},
 		{
 			name:     "rejects non-administrator account",
-			username: "regular", password: "correct",
+			input:    &userSvc.LoginUserAdminIn{Username: "regular", Password: "correct"},
 			expected: expected{code: http.StatusUnauthorized},
 		},
 		{
-			name:     "returns permission service failure",
-			username: "admin", password: "correct", permissionErrorCode: http.StatusServiceUnavailable,
+			name:  "returns permission service failure",
+			input: &userSvc.LoginUserAdminIn{Username: "admin", Password: "correct"},
+			permissionOut: &permissionSvc.GetAdminGroupPrivilegeOut{
+				BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "permission unavailable"},
+			},
 			expected: expected{code: http.StatusServiceUnavailable},
 		},
 	}
@@ -78,14 +82,11 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 			f := newUserAdminFixture(t)
 			seedSharedData(t, f)
 			f.permissionMock.GetAdminGroupPrivilegeFunc = func(context.Context, *permissionSvc.GetAdminGroupPrivilegeIn) *permissionSvc.GetAdminGroupPrivilegeOut {
-				if tt.permissionSuccess {
-					return &permissionSvc.GetAdminGroupPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, AdminPrivilegeGroup: "Root"}
-				}
-				return &permissionSvc.GetAdminGroupPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: tt.permissionErrorCode, ErrorMessage: "permission unavailable"}}
+				return tt.permissionOut
 			}
-			got := f.service.LoginUserAdmin(context.Background(), &userSvc.LoginUserAdminIn{
-				Trace: testTrace(), Username: tt.username, Password: tt.password,
-			})
+			input := tt.input
+			input.Trace = testTrace()
+			got := f.service.LoginUserAdmin(context.Background(), input)
 			assertEqual(t, "LoginUserAdmin() success", tt.expected.success, got.Success)
 			assertEqual(t, "LoginUserAdmin() error code", tt.expected.code, got.ErrorCode)
 			var count int64
@@ -118,7 +119,7 @@ func TestUserAdminService_FilterUser(t *testing.T) {
 		expected        expected
 	}
 
-	// {{User table}}: one active user and one soft-deleted user.
+	// Seed data: one active user and one soft-deleted user.
 	//
 	// +----------+------------+
 	// | Username | Deleted    |
@@ -195,64 +196,66 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 
 	type testCase struct {
 		name            string
-		target          string // "seeded", "missing", "zero"
+		userID          int
 		hasPrivilegeOut *permissionSvc.HasPrivilegeOut
 		expected        expected
 	}
 
-	// {{User table}} and {{RefreshToken table}}: one user with one
-	// active refresh token.
+	// Seed data: one user with one active refresh token. The seeded
+	// user is always the first row in a freshly migrated, isolated
+	// test database, so its ID is deterministically 1.
 	//
-	// +--------------------+--------------+--------+
-	// | Raw Token          | Family       | Expires|
-	// +--------------------+--------------+--------+
-	// | active-user-token  | user-session | +1h    |
-	// +--------------------+--------------+--------+
+	// +----+--------------------+--------------+--------+
+	// | ID | Raw Token          | Family       | Expires|
+	// +----+--------------------+--------------+--------+
+	// | 1  | active-user-token  | user-session | +1h    |
+	// +----+--------------------+--------------+--------+
 	//
 	// A sentinel ID (999999) that can never collide with a seeded row
 	// is used for the "missing target" scenario.
-	const missingUserID = 999999
-	var seededUserID uint
+	const (
+		seededUserID  = 1
+		missingUserID = 999999
+	)
 	seedSharedData := func(t *testing.T, f *userAdminFixture) {
 		user := seedUser(t, f.db)
-		seededUserID = user.ID
 		seedRefreshToken(t, f.db, user.ID, "active-user-token", "user-session", time.Now().Add(time.Hour), nil)
 	}
 
 	// Test cases:
 	//
-	// +---------------------------------------+---------+----------------------------------------+---------+-------------+----------+
-	// | Scenario                               | Target  | HasPrivilegeOut                        | Code    | ActiveUsers | PrivCall |
-	// +---------------------------------------+---------+----------------------------------------+---------+-------------+----------+
-	// | authorized soft-delete                 | seeded  | {Success: true, IsAllowed: true}       | success | 0           | 1        |
-	// | denied permission                      | seeded  | {Success: true, IsAllowed: false}      | 403     | 1           | 1        |
-	// | permission dependency failure           | seeded  | {ErrorCode: 503}                       | 503     | 1           | 1        |
-	// | missing target user                    | missing | {Success: true, IsAllowed: true}       | 404     | 1           | 1        |
-	// | zero target ID (no permission check)   | zero    | (not called)                           | 400     | 1           | 0        |
-	// +---------------------------------------+---------+----------------------------------------+---------+-------------+----------+
+	// +---------------------------------------+---------------+----------------------------------------+---------+-------------+----------+
+	// | Scenario                               | UserID        | HasPrivilegeOut                        | Code    | ActiveUsers | PrivCall |
+	// +---------------------------------------+---------------+----------------------------------------+---------+-------------+----------+
+	// | authorized soft-delete                 | seededUserID  | {Success: true, IsAllowed: true}       | success | 0           | 1        |
+	// | denied permission                      | seededUserID  | {Success: true, IsAllowed: false}      | 403     | 1           | 1        |
+	// | permission dependency failure           | seededUserID  | {ErrorCode: 503}                       | 503     | 1           | 1        |
+	// | missing target user                    | missingUserID | {Success: true, IsAllowed: true}       | 404     | 1           | 1        |
+	// | zero target ID (no permission check)   | 0             | (not called)                           | 400     | 1           | 0        |
+	// +---------------------------------------+---------------+----------------------------------------+---------+-------------+----------+
 	tests := []testCase{
 		{
-			name: "soft-deletes target user when authorized", target: "seeded",
+			name: "soft-deletes target user when authorized", userID: seededUserID,
 			hasPrivilegeOut: &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: true},
 			expected:        expected{success: true, activeUsers: 0, privilegeCall: 1},
 		},
 		{
-			name: "does not modify users when denied", target: "seeded",
+			name: "does not modify users when denied", userID: seededUserID,
 			hasPrivilegeOut: &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: false},
 			expected:        expected{code: http.StatusForbidden, activeUsers: 1, privilegeCall: 1},
 		},
 		{
-			name: "propagates permission dependency failure", target: "seeded",
+			name: "propagates permission dependency failure", userID: seededUserID,
 			hasPrivilegeOut: &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "permission unavailable"}},
 			expected:        expected{code: http.StatusServiceUnavailable, activeUsers: 1, privilegeCall: 1},
 		},
 		{
-			name: "returns not found for missing target", target: "missing",
+			name: "returns not found for missing target", userID: missingUserID,
 			hasPrivilegeOut: &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: true},
 			expected:        expected{code: http.StatusNotFound, activeUsers: 1, privilegeCall: 1},
 		},
 		{
-			name: "rejects zero target ID without checking permission", target: "zero",
+			name: "rejects zero target ID without checking permission", userID: 0,
 			expected: expected{code: http.StatusBadRequest, activeUsers: 1},
 		},
 	}
@@ -264,17 +267,8 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 			f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
 				return tt.hasPrivilegeOut
 			}
-			var userID int
-			switch tt.target {
-			case "seeded":
-				userID = int(seededUserID)
-			case "missing":
-				userID = missingUserID
-			case "zero":
-				userID = 0
-			}
 			got := f.service.DeleteUser(context.Background(), &userSvc.AdminDeleteUserIn{
-				Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: userID,
+				Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: tt.userID,
 			})
 			assertEqual(t, "DeleteUser() success", tt.expected.success, got.Success)
 			assertEqual(t, "DeleteUser() error code", tt.expected.code, got.ErrorCode)
@@ -332,14 +326,24 @@ func TestUserAdminService_Refresh(t *testing.T) {
 	// +-----------------+----------------+--------+--------+
 	var seededUserID uint
 	seedSharedData := func(t *testing.T, f *userAdminFixture) {
-		// {{User table}}
+		// Users table:
+		// +------+--------+
+		// | Role | Count  |
+		// +------+--------+
+		// | Admin| 1      |
+		// +------+--------+
 		user := seedUser(t, f.db, withRole("Admin"))
 		seededUserID = user.ID
 
-		// {{UserPrivilegeGroup table}}
+		// UserPrivilegeGroups table:
+		// +---------------+
+		// | PrivilegeGroup|
+		// +---------------+
+		// | Root          |
+		// +---------------+
 		seedUserPrivilegeGroup(t, f.db, user.ID, "Root")
 
-		// {{RefreshToken table}}
+		// RefreshTokens table (see above):
 		usedAt := time.Now().Add(-time.Minute)
 		seedRefreshTokens(t, f.db,
 			refreshTokenRow{UserID: user.ID, Token: "old-admin-token", Family: "admin-family", ExpireAt: time.Now().Add(time.Hour)},
@@ -406,57 +410,57 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 
 	type testCase struct {
 		name          string
-		useSeededID   bool
 		input         *userSvc.AdminChangePasswordIn
 		permissionOut *permissionSvc.GetAdminGroupPrivilegeOut
 		expected      expected
 	}
 
 	// Seed data: one administrator user with a known old password and
-	// one active refresh token.
+	// one active refresh token. The seeded user is always the first
+	// row in a freshly migrated, isolated test database, so its ID is
+	// deterministically 1.
 	//
-	// +-------+---------------+-----------------+------------------+
-	// | Role  | Old Password  | Refresh Token   | Family           |
-	// +-------+---------------+-----------------+------------------+
-	// | Admin | old-password  | previous-token  | previous-family  |
-	// +-------+---------------+-----------------+------------------+
-	var seededUserID uint
+	// +----+-------+---------------+-----------------+------------------+
+	// | ID | Role  | Old Password  | Refresh Token   | Family           |
+	// +----+-------+---------------+-----------------+------------------+
+	// | 1  | Admin | old-password  | previous-token  | previous-family  |
+	// +----+-------+---------------+-----------------+------------------+
+	const seededAdminID = 1
 	seedSharedData := func(t *testing.T, f *userAdminFixture) {
 		user := seedUser(t, f.db, withRole("Admin"), withPasswordHash(hashPassword(t, "old-password")))
-		seededUserID = user.ID
 		seedRefreshToken(t, f.db, user.ID, "previous-token", "previous-family", time.Now().Add(time.Hour), nil)
 	}
 
 	// Test cases:
 	//
-	// +-----------------------------------------+-------------+----------------------------------------+--------------------------+---------+-----------------+
-	// | Scenario                                 | UseSeededID | Input (OldPassword/NewPassword)         | GetAdminGroupPrivilegeOut | Code    | StoredPassword  |
-	// +-----------------------------------------+-------------+----------------------------------------+--------------------------+---------+-----------------+
-	// | valid old password                       | yes         | old-password/new-password               | {Success: true}           | success | new-password    |
-	// | incorrect old password                   | yes         | wrong/new-password                      | (not called)              | 400     | old-password    |
-	// | permission lookup failure (rolls back)   | yes         | old-password/new-password               | {ErrorCode: 503}          | 503     | old-password    |
-	// | missing required ID                      | no          | old/new                                 | (not called)              | 400     |                 |
-	// +-----------------------------------------+-------------+----------------------------------------+--------------------------+---------+-----------------+
+	// +-----------------------------------------+---------------+------------------------------------------+----------------------------+---------+-----------------+
+	// | Scenario                                 | UserAdminId   | Input (OldPassword/NewPassword)           | GetAdminGroupPrivilegeOut  | Code    | StoredPassword  |
+	// +-----------------------------------------+---------------+------------------------------------------+----------------------------+---------+-----------------+
+	// | valid old password                       | seededAdminID | old-password/new-password                 | {Success: true}            | success | new-password    |
+	// | incorrect old password                   | seededAdminID | wrong/new-password                        | (not called)               | 400     | old-password    |
+	// | permission lookup failure (rolls back)   | seededAdminID | old-password/new-password                 | {ErrorCode: 503}           | 503     | old-password    |
+	// | missing required ID                      | 0             | old/new                                   | (not called)               | 400     |                 |
+	// +-----------------------------------------+---------------+------------------------------------------+----------------------------+---------+-----------------+
 	tests := []testCase{
 		{
-			name: "updates password and issues a new refresh token", useSeededID: true,
-			input:         &userSvc.AdminChangePasswordIn{OldPassword: "old-password", NewPassword: "new-password"},
+			name:          "updates password and issues a new refresh token",
+			input:         &userSvc.AdminChangePasswordIn{UserAdminId: seededAdminID, OldPassword: "old-password", NewPassword: "new-password"},
 			permissionOut: &permissionSvc.GetAdminGroupPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, AdminPrivilegeGroup: "Root"},
 			expected:      expected{success: true, storedPassword: "new-password"},
 		},
 		{
-			name: "rejects incorrect old password without changing data", useSeededID: true,
-			input:    &userSvc.AdminChangePasswordIn{OldPassword: "wrong", NewPassword: "new-password"},
+			name:     "rejects incorrect old password without changing data",
+			input:    &userSvc.AdminChangePasswordIn{UserAdminId: seededAdminID, OldPassword: "wrong", NewPassword: "new-password"},
 			expected: expected{code: http.StatusBadRequest, storedPassword: "old-password"},
 		},
 		{
-			name: "rolls back password update if permission lookup fails", useSeededID: true,
-			input:         &userSvc.AdminChangePasswordIn{OldPassword: "old-password", NewPassword: "new-password"},
+			name:          "rolls back password update if permission lookup fails",
+			input:         &userSvc.AdminChangePasswordIn{UserAdminId: seededAdminID, OldPassword: "old-password", NewPassword: "new-password"},
 			permissionOut: &permissionSvc.GetAdminGroupPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "permission unavailable"}},
 			expected:      expected{code: http.StatusServiceUnavailable, storedPassword: "old-password"},
 		},
 		{
-			name: "validates required ID", useSeededID: false,
+			name:     "validates required ID",
 			input:    &userSvc.AdminChangePasswordIn{OldPassword: "old", NewPassword: "new"},
 			expected: expected{code: http.StatusBadRequest},
 		},
@@ -471,27 +475,42 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 			}
 			input := tt.input
 			input.Trace = testTrace()
-			if tt.useSeededID {
-				input.UserAdminId = int(seededUserID)
-			}
 			got := f.service.ChangeAdminPassword(context.Background(), input)
 			assertEqual(t, "ChangeAdminPassword() success", tt.expected.success, got.Success)
 			assertEqual(t, "ChangeAdminPassword() error code", tt.expected.code, got.ErrorCode)
+
 			var user model.User
 			err := f.db.First(&user, input.UserAdminId).Error
 			if err == nil && tt.expected.storedPassword != "" && !helpers.VerifyPassword(tt.expected.storedPassword, user.Password) {
 				t.Fatalf("stored password does not verify against expected password %q", tt.expected.storedPassword)
 			}
-			var refreshTokens []model.RefreshToken
-			if err := f.db.Order("id").Find(&refreshTokens).Error; err != nil {
+
+			var previousToken model.RefreshToken
+			if err := f.db.Where("token_hash = ?", helpers.HashToken("previous-token")).First(&previousToken).Error; err != nil {
 				t.Fatal(err)
 			}
-			if tt.expected.success {
-				if len(refreshTokens) != 2 || refreshTokens[0].RevokedAt == nil || got.RefreshToken == "" {
-					t.Fatalf("refresh token state = %+v; expected old token revoked and replacement issued", refreshTokens)
+
+			if !tt.expected.success {
+				// ensure the refresh token was not revoked and no replacement was issued
+				if previousToken.RevokedAt != nil {
+					t.Fatal("failed password change revoked the existing refresh token")
 				}
-			} else if len(refreshTokens) != 1 {
-				t.Fatalf("failed password change modified refresh tokens: %+v", refreshTokens)
+				if got.RefreshToken != "" {
+					t.Fatal("failed password change issued a replacement refresh token")
+				}
+				return
+			}
+
+			// ensure the old refresh token was revoked and a replacement was issued
+			if previousToken.RevokedAt == nil {
+				t.Fatal("refresh token was not revoked after password change")
+			}
+			if got.RefreshToken == "" {
+				t.Fatal("no replacement refresh token issued after password change")
+			}
+			var newToken model.RefreshToken
+			if err := f.db.Where("token_hash = ?", helpers.HashToken(got.RefreshToken)).First(&newToken).Error; err != nil {
+				t.Fatalf("replacement refresh token was not persisted: %v", err)
 			}
 		})
 	}
