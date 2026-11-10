@@ -119,5 +119,6 @@ type RegisterNewAdminIn struct {
 	PrivilegeGroup      string
 }
 type RegisterNewAdminOut struct {
+	InsertedUserId uint
 	dto.BaseOut
 }

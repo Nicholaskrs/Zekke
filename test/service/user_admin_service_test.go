@@ -3,555 +3,465 @@ package service_test
 import (
 	"context"
 	"net/http"
-	"testing"
-	"time"
-
 	dto "template-go/base/base"
 	"template-go/base/helpers"
-	"template-go/data/model"
 	permissionSvc "template-go/modules/permission/svc"
+	"template-go/modules/user/permission"
 	userSvc "template-go/modules/user/svc"
+	"template-go/test/fixture"
+	"testing"
 )
-
-type userAdminServiceLoginUserAdminExpected struct {
-	success bool
-	code    int
-	tokens  int64
-}
-
-type userAdminServiceLoginUserAdminTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.LoginUserAdminIn
-	expected userAdminServiceLoginUserAdminExpected
-}
-
-type userAdminServiceFilterUserExpected struct {
-	success   bool
-	code      int
-	users     int
-	totalRows int
-}
-
-type userAdminServiceFilterUserTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminFilterUserIn
-	expected userAdminServiceFilterUserExpected
-}
-
-type userAdminServiceDeleteUserExpected struct {
-	success       bool
-	code          int
-	activeUsers   int64
-	privilegeCall int
-}
-
-type userAdminServiceDeleteUserTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminDeleteUserIn
-	expected userAdminServiceDeleteUserExpected
-}
-
-type userAdminServiceRefreshExpected struct {
-	success bool
-	code    int
-	tokens  int64
-}
-
-type userAdminServiceRefreshTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminRefreshIn
-	expected userAdminServiceRefreshExpected
-}
-
-type userAdminServiceChangeAdminPasswordExpected struct {
-	success        bool
-	code           int
-	storedPassword string
-}
-
-type userAdminServiceChangeAdminPasswordTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.AdminChangePasswordIn
-	expected userAdminServiceChangeAdminPasswordExpected
-}
-
-type userAdminServiceRegisterNewAdminExpected struct {
-	success        bool
-	code           int
-	users          int64
-	assignCalls    int
-	privilegeCalls int
-}
-
-type userAdminServiceRegisterNewAdminTestCase struct {
-	name     string
-	setup    func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn
-	expected userAdminServiceRegisterNewAdminExpected
-}
-
-func TestUserAdminService_LoginUserAdmin(t *testing.T) {
-	t.Parallel()
-
-	tests := []userAdminServiceLoginUserAdminTestCase{
-		{
-			name: "issues tokens for valid administrator credentials",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.LoginUserAdminIn {
-				seedUser(t, f.db, withUsername("admin"), withRole("Admin"), withPasswordHash(hashPassword(t, "correct")))
-				f.permissionMock.GetAdminGroupPrivilegeFunc = func(context.Context, *permissionSvc.GetAdminGroupPrivilegeIn) *permissionSvc.GetAdminGroupPrivilegeOut {
-					return &permissionSvc.GetAdminGroupPrivilegeOut{
-						BaseOut: dto.BaseOut{Success: true}, AdminPrivilegeGroup: "Root",
-					}
-				}
-				return &userSvc.LoginUserAdminIn{Trace: testTrace(), Username: "admin", Password: "correct"}
-			},
-			expected: userAdminServiceLoginUserAdminExpected{success: true, tokens: 1},
-		},
-		{
-			name: "rejects non-administrator account",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.LoginUserAdminIn {
-				seedUser(t, f.db, withUsername("regular"), withRole("User"), withPasswordHash(hashPassword(t, "correct")))
-				return &userSvc.LoginUserAdminIn{Trace: testTrace(), Username: "regular", Password: "correct"}
-			},
-			expected: userAdminServiceLoginUserAdminExpected{code: http.StatusUnauthorized},
-		},
-		{
-			name: "returns permission service failure",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.LoginUserAdminIn {
-				seedUser(t, f.db, withUsername("admin"), withRole("Admin"), withPasswordHash(hashPassword(t, "correct")))
-				f.permissionMock.GetAdminGroupPrivilegeFunc = func(context.Context, *permissionSvc.GetAdminGroupPrivilegeIn) *permissionSvc.GetAdminGroupPrivilegeOut {
-					return &permissionSvc.GetAdminGroupPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "permission unavailable"}}
-				}
-				return &userSvc.LoginUserAdminIn{Trace: testTrace(), Username: "admin", Password: "correct"}
-			},
-			expected: userAdminServiceLoginUserAdminExpected{code: http.StatusServiceUnavailable},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newUserAdminFixture(t)
-			got := f.service.LoginUserAdmin(context.Background(), tt.setup(t, f))
-			assertEqual(t, "LoginUserAdmin() success", tt.expected.success, got.Success)
-			assertEqual(t, "LoginUserAdmin() error code", tt.expected.code, got.ErrorCode)
-			var count int64
-			if err := f.db.Model(&model.RefreshToken{}).Count(&count).Error; err != nil {
-				t.Fatal(err)
-			}
-			if count != tt.expected.tokens {
-				t.Fatalf("persisted refresh token count = %d, want %d", count, tt.expected.tokens)
-			}
-			if tt.expected.success && (got.Token == "" || got.RefreshToken == "") {
-				t.Fatal("LoginUserAdmin() returned empty token")
-			}
-		})
-	}
-}
-
-func TestUserAdminService_FilterUser(t *testing.T) {
-	t.Parallel()
-
-	tests := []userAdminServiceFilterUserTestCase{
-		{
-			name: "returns active users and count",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminFilterUserIn {
-				seedUser(t, f.db, withUsername("active"))
-				deletedAt := time.Now()
-				seed := seedUser(t, f.db, withUsername("deleted"))
-				if err := f.db.Model(seed).Update("deleted_at", deletedAt).Error; err != nil {
-					t.Fatal(err)
-				}
-				f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: true}
-				}
-				return &userSvc.AdminFilterUserIn{
-					Trace: testTrace(), PaginateIn: dto.PaginateIn{Page: 1, Limit: 10},
-					AdminUserId: 1, AdminPrivilegeGroup: "Root",
-				}
-			},
-			expected: userAdminServiceFilterUserExpected{success: true, users: 1, totalRows: 1},
-		},
-		{
-			name: "rejects denied permission",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminFilterUserIn {
-				f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}}
-				}
-				return &userSvc.AdminFilterUserIn{
-					Trace: testTrace(), PaginateIn: dto.PaginateIn{Page: 1, Limit: 10},
-					AdminUserId: 1, AdminPrivilegeGroup: "Root",
-				}
-			},
-			expected: userAdminServiceFilterUserExpected{code: http.StatusForbidden},
-		},
-		{
-			name: "propagates permission service error",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminFilterUserIn {
-				f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "permission failure"}}
-				}
-				return &userSvc.AdminFilterUserIn{
-					Trace: testTrace(), PaginateIn: dto.PaginateIn{Page: 1, Limit: 10},
-					AdminUserId: 1, AdminPrivilegeGroup: "Root",
-				}
-			},
-			expected: userAdminServiceFilterUserExpected{code: http.StatusServiceUnavailable},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newUserAdminFixture(t)
-			got := f.service.FilterUser(context.Background(), tt.setup(t, f))
-			assertEqual(t, "FilterUser() success", tt.expected.success, got.Success)
-			assertEqual(t, "FilterUser() error code", tt.expected.code, got.ErrorCode)
-			assertEqual(t, "FilterUser() user count", tt.expected.users, len(got.Users))
-			assertEqual(t, "FilterUser() total rows", tt.expected.totalRows, got.TotalRows)
-			if calls := f.permissionMock.HasPrivilegeCalls(); len(calls) != 1 {
-				t.Fatalf("HasPrivilege calls = %d, want 1", len(calls))
-			}
-		})
-	}
-}
-
-func TestUserAdminService_DeleteUser(t *testing.T) {
-	t.Parallel()
-
-	tests := []userAdminServiceDeleteUserTestCase{
-		{
-			name: "soft-deletes target user when authorized",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminDeleteUserIn {
-				user := seedUser(t, f.db)
-				seedRefreshToken(t, f.db, user.ID, "active-user-token", "user-session", time.Now().Add(time.Hour), nil)
-				f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: true}
-				}
-				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: int(user.ID)}
-			},
-			expected: userAdminServiceDeleteUserExpected{success: true, privilegeCall: 1},
-		},
-		{
-			name: "does not modify users when denied",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminDeleteUserIn {
-				user := seedUser(t, f.db)
-				f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}}
-				}
-				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: int(user.ID)}
-			},
-			expected: userAdminServiceDeleteUserExpected{code: http.StatusForbidden, activeUsers: 1, privilegeCall: 1},
-		},
-		{
-			name: "propagates permission dependency failure",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminDeleteUserIn {
-				user := seedUser(t, f.db)
-				f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "permission unavailable"}}
-				}
-				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: int(user.ID)}
-			},
-			expected: userAdminServiceDeleteUserExpected{code: http.StatusServiceUnavailable, activeUsers: 1, privilegeCall: 1},
-		},
-		{
-			name: "returns not found for missing target",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminDeleteUserIn {
-				f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: true}
-				}
-				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root", UserId: 42}
-			},
-			expected: userAdminServiceDeleteUserExpected{code: http.StatusNotFound, privilegeCall: 1},
-		},
-		{
-			name: "rejects zero target ID without checking permission",
-			setup: func(t *testing.T, _ *userAdminFixture) *userSvc.AdminDeleteUserIn {
-				return &userSvc.AdminDeleteUserIn{Trace: testTrace(), AdminPrivilegeGroup: "Root"}
-			},
-			expected: userAdminServiceDeleteUserExpected{code: http.StatusBadRequest},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newUserAdminFixture(t)
-			got := f.service.DeleteUser(context.Background(), tt.setup(t, f))
-			assertEqual(t, "DeleteUser() success", tt.expected.success, got.Success)
-			assertEqual(t, "DeleteUser() error code", tt.expected.code, got.ErrorCode)
-			var count int64
-			if err := f.db.Model(&model.User{}).Where("deleted_at IS NULL").Count(&count).Error; err != nil {
-				t.Fatal(err)
-			}
-			if count != tt.expected.activeUsers {
-				t.Fatalf("active user count = %d, want %d", count, tt.expected.activeUsers)
-			}
-			if tt.expected.success {
-				var token model.RefreshToken
-				if err := f.db.Where("token_hash = ?", helpers.HashToken("active-user-token")).First(&token).Error; err != nil {
-					t.Fatal(err)
-				}
-				if token.RevokedAt == nil {
-					t.Fatal("refresh token was not revoked with deleted user")
-				}
-			}
-			if calls := f.permissionMock.HasPrivilegeCalls(); len(calls) != tt.expected.privilegeCall {
-				t.Fatalf("HasPrivilege calls = %d, want %d", len(calls), tt.expected.privilegeCall)
-			}
-		})
-	}
-}
-
-func TestUserAdminService_Refresh(t *testing.T) {
-	t.Parallel()
-
-	tests := []userAdminServiceRefreshTestCase{
-		{
-			name: "rotates administrator refresh token",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminRefreshIn {
-				user := seedUser(t, f.db, withRole("Admin"))
-				seedUserPrivilegeGroup(t, f.db, user.ID, "Root")
-				seedRefreshToken(t, f.db, user.ID, "old-admin-token", "admin-family", time.Now().Add(time.Hour), nil)
-				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "old-admin-token"}
-			},
-			expected: userAdminServiceRefreshExpected{success: true, tokens: 2},
-		},
-		{
-			name: "returns not found for unknown token",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminRefreshIn {
-				user := seedUser(t, f.db, withRole("Admin"))
-				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "missing"}
-			},
-			expected: userAdminServiceRefreshExpected{code: http.StatusNotFound},
-		},
-		{
-			name: "rejects expired token",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminRefreshIn {
-				user := seedUser(t, f.db, withRole("Admin"))
-				seedRefreshToken(t, f.db, user.ID, "expired-admin", "admin-family", time.Now().Add(-time.Hour), nil)
-				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "expired-admin"}
-			},
-			expected: userAdminServiceRefreshExpected{code: http.StatusForbidden, tokens: 1},
-		},
-		{
-			name: "revokes family when used token is reused",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminRefreshIn {
-				user := seedUser(t, f.db, withRole("Admin"))
-				usedAt := time.Now().Add(-time.Minute)
-				seedRefreshToken(t, f.db, user.ID, "used-admin", "admin-family", time.Now().Add(time.Hour), &usedAt)
-				seedRefreshToken(t, f.db, user.ID, "sibling-admin", "admin-family", time.Now().Add(time.Hour), nil)
-				return &userSvc.AdminRefreshIn{Trace: testTrace(), AdminUserId: int(user.ID), RefreshToken: "used-admin"}
-			},
-			expected: userAdminServiceRefreshExpected{code: http.StatusForbidden, tokens: 2},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newUserAdminFixture(t)
-			got := f.service.Refresh(context.Background(), tt.setup(t, f))
-			assertEqual(t, "Refresh() success", tt.expected.success, got.Success)
-			assertEqual(t, "Refresh() error code", tt.expected.code, got.ErrorCode)
-			var count int64
-			if err := f.db.Model(&model.RefreshToken{}).Count(&count).Error; err != nil {
-				t.Fatal(err)
-			}
-			if count != tt.expected.tokens {
-				t.Fatalf("refresh token count = %d, want %d", count, tt.expected.tokens)
-			}
-			if tt.name == "revokes family when used token is reused" {
-				var revoked int64
-				if err := f.db.Model(&model.RefreshToken{}).Where("revoked_at IS NOT NULL").Count(&revoked).Error; err != nil {
-					t.Fatal(err)
-				}
-				if revoked != 2 {
-					t.Fatalf("revoked refresh token count = %d, want 2", revoked)
-				}
-			}
-		})
-	}
-}
-
-func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
-	t.Parallel()
-
-	tests := []userAdminServiceChangeAdminPasswordTestCase{
-		{
-			name: "updates password and issues a new refresh token",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminChangePasswordIn {
-				user := seedUser(t, f.db, withRole("Admin"), withPasswordHash(hashPassword(t, "old-password")))
-				seedRefreshToken(t, f.db, user.ID, "previous-token", "previous-family", time.Now().Add(time.Hour), nil)
-				f.permissionMock.GetAdminGroupPrivilegeFunc = func(context.Context, *permissionSvc.GetAdminGroupPrivilegeIn) *permissionSvc.GetAdminGroupPrivilegeOut {
-					return &permissionSvc.GetAdminGroupPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, AdminPrivilegeGroup: "Root"}
-				}
-				return &userSvc.AdminChangePasswordIn{
-					Trace: testTrace(), UserAdminId: int(user.ID), OldPassword: "old-password", NewPassword: "new-password",
-				}
-			},
-			expected: userAdminServiceChangeAdminPasswordExpected{success: true, storedPassword: "new-password"},
-		},
-		{
-			name: "rejects incorrect old password without changing data",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminChangePasswordIn {
-				user := seedUser(t, f.db, withRole("Admin"), withPasswordHash(hashPassword(t, "old-password")))
-				return &userSvc.AdminChangePasswordIn{
-					Trace: testTrace(), UserAdminId: int(user.ID), OldPassword: "wrong", NewPassword: "new-password",
-				}
-			},
-			expected: userAdminServiceChangeAdminPasswordExpected{code: http.StatusBadRequest, storedPassword: "old-password"},
-		},
-		{
-			name: "rolls back password update if permission lookup fails",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.AdminChangePasswordIn {
-				user := seedUser(t, f.db, withRole("Admin"), withPasswordHash(hashPassword(t, "old-password")))
-				f.permissionMock.GetAdminGroupPrivilegeFunc = func(context.Context, *permissionSvc.GetAdminGroupPrivilegeIn) *permissionSvc.GetAdminGroupPrivilegeOut {
-					return &permissionSvc.GetAdminGroupPrivilegeOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusServiceUnavailable, ErrorMessage: "permission unavailable"}}
-				}
-				return &userSvc.AdminChangePasswordIn{
-					Trace: testTrace(), UserAdminId: int(user.ID), OldPassword: "old-password", NewPassword: "new-password",
-				}
-			},
-			expected: userAdminServiceChangeAdminPasswordExpected{code: http.StatusServiceUnavailable, storedPassword: "old-password"},
-		},
-		{
-			name: "validates required ID",
-			setup: func(t *testing.T, _ *userAdminFixture) *userSvc.AdminChangePasswordIn {
-				return &userSvc.AdminChangePasswordIn{Trace: testTrace(), OldPassword: "old", NewPassword: "new"}
-			},
-			expected: userAdminServiceChangeAdminPasswordExpected{code: http.StatusBadRequest},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newUserAdminFixture(t)
-			input := tt.setup(t, f)
-			got := f.service.ChangeAdminPassword(context.Background(), input)
-			assertEqual(t, "ChangeAdminPassword() success", tt.expected.success, got.Success)
-			assertEqual(t, "ChangeAdminPassword() error code", tt.expected.code, got.ErrorCode)
-			var user model.User
-			err := f.db.First(&user, input.UserAdminId).Error
-			if err == nil && tt.expected.storedPassword != "" && !helpers.VerifyPassword(tt.expected.storedPassword, user.Password) {
-				t.Fatalf("stored password does not verify against expected password %q", tt.expected.storedPassword)
-			}
-			var refreshTokens []model.RefreshToken
-			if err := f.db.Order("id").Find(&refreshTokens).Error; err != nil {
-				t.Fatal(err)
-			}
-			if tt.expected.success {
-				if len(refreshTokens) != 2 || refreshTokens[0].RevokedAt == nil || got.RefreshToken == "" {
-					t.Fatalf("refresh token state = %+v; expected old token revoked and replacement issued", refreshTokens)
-				}
-			} else if len(refreshTokens) != 0 {
-				t.Fatalf("failed password change modified refresh tokens: %+v", refreshTokens)
-			}
-		})
-	}
-}
 
 func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 	t.Parallel()
 
-	tests := []userAdminServiceRegisterNewAdminTestCase{
+	type input struct {
+		UserAdminId         int
+		AdminPrivilegeGroup string
+		Username            string
+		Email               string
+		Password            string
+		FullName            string
+		PrivilegeGroup      string
+	}
+	type expected struct {
+		success          bool
+		errorCode        int
+		assignCalls      int
+		privilegeCalls   int
+		groupExistsCalls int
+	}
+
+	type testCase struct {
+		name                      string
+		input                     input
+		expected                  expected
+		privilegeExistsMock       *permissionSvc.CheckAdminGroupPrivilegeExistsOut
+		hasPrivilegeMock          *permissionSvc.HasPrivilegeOut
+		changeAdminPermissionMock *permissionSvc.ChangeAdminPrivilegeRoleOut
+	}
+
+	// +----------+
+	// | Username |
+	// +----------+
+	// | taken    |
+	// +----------+
+	f := fixture.NewUserFixture(t)
+	f.SeedUsers(t, []fixture.UserRow{
+		{Username: "taken"},
+	})
+
+	// Default value for mock value.
+	defaultPrivilegeExistsMock := func() *permissionSvc.CheckAdminGroupPrivilegeExistsOut {
+		return &permissionSvc.CheckAdminGroupPrivilegeExistsOut{
+			BaseOut: dto.BaseOut{
+				Success:      true,
+				ErrorMessage: "",
+				ErrorCode:    0,
+			},
+			IsExists: true,
+		}
+	}
+	defaultHasPrivilegeMock := func() *permissionSvc.HasPrivilegeOut {
+		return &permissionSvc.HasPrivilegeOut{
+			BaseOut: dto.BaseOut{
+				Success:      true,
+				ErrorMessage: "",
+				ErrorCode:    0,
+			},
+			IsAllowed: true,
+		}
+	}
+	defaultChangeAdminPermissionMock := func() *permissionSvc.ChangeAdminPrivilegeRoleOut {
+		return &permissionSvc.ChangeAdminPrivilegeRoleOut{
+			BaseOut: dto.BaseOut{
+				Success:      true,
+				ErrorMessage: "",
+				ErrorCode:    0,
+			},
+		}
+	}
+
+	tests := []testCase{
 		{
 			name: "registers admin and assigns requested group",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn {
-				f.permissionMock.CheckAdminGroupPrivilegeExistsFunc = func(context.Context, *permissionSvc.CheckAdminGroupPrivilegeExistsIn) *permissionSvc.CheckAdminGroupPrivilegeExistsOut {
-					return &permissionSvc.CheckAdminGroupPrivilegeExistsOut{BaseOut: dto.BaseOut{Success: true}, IsExists: true}
-				}
-				f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: true}
-				}
-				f.permissionMock.ChangeAdminPrivilegeRoleFunc = func(context.Context, *permissionSvc.ChangeAdminPrivilegeRoleIn) *permissionSvc.ChangeAdminPrivilegeRoleOut {
-					return &permissionSvc.ChangeAdminPrivilegeRoleOut{BaseOut: dto.BaseOut{Success: true}}
-				}
-				return &userSvc.RegisterNewAdminIn{
-					Trace: testTrace(), UserAdminId: 1, AdminPrivilegeGroup: "Root",
-					Username: "new-admin", Email: "new-admin@example.test", Password: "password",
-					FullName: "New Admin", PrivilegeGroup: "Auditor",
-				}
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "new-admin",
+				Email:               "new-admin@gmail.com",
+				Password:            "helloWorld",
+				FullName:            "John Smith",
+				PrivilegeGroup:      "Auditor",
 			},
-			expected: userAdminServiceRegisterNewAdminExpected{success: true, users: 1, assignCalls: 1, privilegeCalls: 1},
+			expected: expected{
+				success:          true,
+				assignCalls:      1,
+				privilegeCalls:   1,
+				groupExistsCalls: 1,
+				errorCode:        0,
+			},
+			privilegeExistsMock:       defaultPrivilegeExistsMock(),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
+		},
+		{
+			name: "UserAdminId Empty",
+			input: input{
+				UserAdminId:         0,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "new-admin2",
+				Email:               "new-admin2@gmail.com",
+				Password:            "helloWorld2",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
+			},
+			expected: expected{
+				success:          false,
+				errorCode:        http.StatusBadRequest,
+				assignCalls:      0,
+				privilegeCalls:   0,
+				groupExistsCalls: 0,
+			},
+			privilegeExistsMock:       defaultPrivilegeExistsMock(),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
+		},
+		{
+			name: "AdminPrivilegeGroup Empty",
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "",
+				Username:            "new-admin2",
+				Email:               "new-admin2@gmail.com",
+				Password:            "helloWorld2",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
+			},
+			expected: expected{
+				success:          false,
+				errorCode:        http.StatusBadRequest,
+				assignCalls:      0,
+				privilegeCalls:   0,
+				groupExistsCalls: 0,
+			},
+			privilegeExistsMock:       defaultPrivilegeExistsMock(),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
+		},
+		{
+			name: "AdminPrivilegeGroup Username Empty",
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "",
+				Email:               "new-admin2@gmail.com",
+				Password:            "helloWorld2",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
+			},
+			expected: expected{
+				success:          false,
+				errorCode:        http.StatusBadRequest,
+				assignCalls:      0,
+				privilegeCalls:   0,
+				groupExistsCalls: 0,
+			},
+			privilegeExistsMock:       defaultPrivilegeExistsMock(),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
+		},
+		{
+			name: "AdminPrivilegeGroup Email Empty",
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "newadmin2",
+				Email:               "",
+				Password:            "helloWorld2",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
+			},
+			expected: expected{
+				success:          false,
+				errorCode:        http.StatusBadRequest,
+				assignCalls:      0,
+				privilegeCalls:   0,
+				groupExistsCalls: 0,
+			},
+			privilegeExistsMock:       defaultPrivilegeExistsMock(),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
+		},
+		{
+			name: "AdminPrivilegeGroup Password Empty",
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "newadmin2",
+				Email:               "new-admin2@gmail.com",
+				Password:            "",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
+			},
+			expected: expected{
+				success:          false,
+				errorCode:        http.StatusBadRequest,
+				assignCalls:      0,
+				privilegeCalls:   0,
+				groupExistsCalls: 0,
+			},
+			privilegeExistsMock:       defaultPrivilegeExistsMock(),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
+		},
+		{
+			name: "AdminPrivilegeGroup Fullname Empty",
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "newadmin2",
+				Email:               "new-admin2@gmail.com",
+				Password:            "asdasdasd",
+				FullName:            "",
+				PrivilegeGroup:      "Auditor",
+			},
+			expected: expected{
+				success:          false,
+				errorCode:        http.StatusBadRequest,
+				assignCalls:      0,
+				privilegeCalls:   0,
+				groupExistsCalls: 0,
+			},
+			privilegeExistsMock:       defaultPrivilegeExistsMock(),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
+		},
+		{
+			name: "AdminPrivilegeGroup PrivilegeGroup Empty",
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "newadmin2",
+				Email:               "new-admin2@gmail.com",
+				Password:            "asdasdasd",
+				FullName:            "John Smith",
+				PrivilegeGroup:      "",
+			},
+			expected: expected{
+				success:          false,
+				errorCode:        http.StatusBadRequest,
+				assignCalls:      0,
+				privilegeCalls:   0,
+				groupExistsCalls: 0,
+			},
+			privilegeExistsMock:       defaultPrivilegeExistsMock(),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
 		},
 		{
 			name: "rejects a privilege group that does not exist",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn {
-				f.permissionMock.CheckAdminGroupPrivilegeExistsFunc = func(context.Context, *permissionSvc.CheckAdminGroupPrivilegeExistsIn) *permissionSvc.CheckAdminGroupPrivilegeExistsOut {
-					return &permissionSvc.CheckAdminGroupPrivilegeExistsOut{BaseOut: dto.BaseOut{Success: true}}
-				}
-				return &userSvc.RegisterNewAdminIn{
-					Trace: testTrace(), UserAdminId: 1, AdminPrivilegeGroup: "Root",
-					Username: "new-admin", Email: "new-admin@example.test", Password: "password", PrivilegeGroup: "Missing",
-				}
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "new-admin2",
+				Email:               "new-admin2@gmail.com",
+				Password:            "helloWorld2",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
 			},
-			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusBadRequest},
+			expected: expected{
+				success:        false,
+				errorCode:      http.StatusBadRequest,
+				assignCalls:    0,
+				privilegeCalls: 1,
+			},
+			privilegeExistsMock: fixture.Modify(defaultPrivilegeExistsMock, func(out *permissionSvc.CheckAdminGroupPrivilegeExistsOut) {
+				out.IsExists = false
+			}),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
+		},
+		{
+			name: "check privilege exists failing",
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "new-admin2",
+				Email:               "new-admin2@gmail.com",
+				Password:            "helloWorld2",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
+			},
+			expected: expected{
+				success:        false,
+				errorCode:      http.StatusInternalServerError,
+				assignCalls:    0,
+				privilegeCalls: 1,
+			},
+			privilegeExistsMock: fixture.Modify(defaultPrivilegeExistsMock, func(out *permissionSvc.CheckAdminGroupPrivilegeExistsOut) {
+				out.Success = false
+				out.ErrorCode = http.StatusInternalServerError
+			}),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
 		},
 		{
 			name: "rejects caller without registration privilege",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn {
-				f.permissionMock.CheckAdminGroupPrivilegeExistsFunc = func(context.Context, *permissionSvc.CheckAdminGroupPrivilegeExistsIn) *permissionSvc.CheckAdminGroupPrivilegeExistsOut {
-					return &permissionSvc.CheckAdminGroupPrivilegeExistsOut{BaseOut: dto.BaseOut{Success: true}, IsExists: true}
-				}
-				f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}}
-				}
-				return &userSvc.RegisterNewAdminIn{Trace: testTrace(), UserAdminId: 1, AdminPrivilegeGroup: "Root", PrivilegeGroup: "Auditor"}
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "new-admin2",
+				Email:               "new-admin2@gmail.com",
+				Password:            "helloWorld2",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
 			},
-			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusForbidden, privilegeCalls: 1},
+			expected: expected{
+				errorCode:      http.StatusForbidden,
+				privilegeCalls: 1,
+			},
+			privilegeExistsMock: defaultPrivilegeExistsMock(),
+			hasPrivilegeMock: fixture.Modify(defaultHasPrivilegeMock, func(out *permissionSvc.HasPrivilegeOut) {
+				out.IsAllowed = false
+			}),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
 		},
 		{
-			name: "rolls back created user if group assignment fails",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn {
-				f.permissionMock.CheckAdminGroupPrivilegeExistsFunc = func(context.Context, *permissionSvc.CheckAdminGroupPrivilegeExistsIn) *permissionSvc.CheckAdminGroupPrivilegeExistsOut {
-					return &permissionSvc.CheckAdminGroupPrivilegeExistsOut{BaseOut: dto.BaseOut{Success: true}, IsExists: true}
-				}
-				f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: true}
-				}
-				f.permissionMock.ChangeAdminPrivilegeRoleFunc = func(context.Context, *permissionSvc.ChangeAdminPrivilegeRoleIn) *permissionSvc.ChangeAdminPrivilegeRoleOut {
-					return &permissionSvc.ChangeAdminPrivilegeRoleOut{BaseOut: dto.BaseOut{ErrorCode: http.StatusConflict, ErrorMessage: "group assignment failed"}}
-				}
-				return &userSvc.RegisterNewAdminIn{
-					Trace: testTrace(), UserAdminId: 1, AdminPrivilegeGroup: "Root",
-					Username: "new-admin", Email: "new-admin@example.test", Password: "password", PrivilegeGroup: "Auditor",
-				}
+			name: "fail when checking privilege failing",
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "new-admin2",
+				Email:               "new-admin2@gmail.com",
+				Password:            "helloWorld2",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
 			},
-			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusConflict, assignCalls: 1, privilegeCalls: 1},
+			expected: expected{
+				errorCode:      http.StatusInternalServerError,
+				privilegeCalls: 1,
+			},
+			privilegeExistsMock: defaultPrivilegeExistsMock(),
+			hasPrivilegeMock: fixture.Modify(defaultHasPrivilegeMock, func(out *permissionSvc.HasPrivilegeOut) {
+				out.Success = false
+				out.ErrorCode = http.StatusInternalServerError
+			}),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
+		},
+		{
+			name: "fail when change permission failing",
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "new-admin2",
+				Email:               "new-admin2@gmail.com",
+				Password:            "helloWorld2",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
+			},
+			expected: expected{
+				success:          false,
+				errorCode:        http.StatusInternalServerError,
+				assignCalls:      1,
+				privilegeCalls:   1,
+				groupExistsCalls: 1,
+			},
+			privilegeExistsMock: defaultPrivilegeExistsMock(),
+			hasPrivilegeMock:    defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: fixture.Modify(defaultChangeAdminPermissionMock, func(out *permissionSvc.ChangeAdminPrivilegeRoleOut) {
+				out.Success = false
+				out.ErrorCode = http.StatusInternalServerError
+			}),
 		},
 		{
 			name: "rejects duplicate username",
-			setup: func(t *testing.T, f *userAdminFixture) *userSvc.RegisterNewAdminIn {
-				seedUser(t, f.db, withUsername("taken"))
-				f.permissionMock.CheckAdminGroupPrivilegeExistsFunc = func(context.Context, *permissionSvc.CheckAdminGroupPrivilegeExistsIn) *permissionSvc.CheckAdminGroupPrivilegeExistsOut {
-					return &permissionSvc.CheckAdminGroupPrivilegeExistsOut{BaseOut: dto.BaseOut{Success: true}, IsExists: true}
-				}
-				f.permissionMock.HasPrivilegeFunc = func(context.Context, *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-					return &permissionSvc.HasPrivilegeOut{BaseOut: dto.BaseOut{Success: true}, IsAllowed: true}
-				}
-				return &userSvc.RegisterNewAdminIn{
-					Trace: testTrace(), UserAdminId: 1, AdminPrivilegeGroup: "Root",
-					Username: "taken", Email: "new-admin@example.test", Password: "password", PrivilegeGroup: "Auditor",
-				}
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "taken",
+				Email:               "new-admin2@gmail.com",
+				Password:            "helloWorld2",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
 			},
-			expected: userAdminServiceRegisterNewAdminExpected{code: http.StatusBadRequest, users: 1, privilegeCalls: 1},
+			expected: expected{
+				errorCode:      http.StatusBadRequest,
+				privilegeCalls: 1,
+			},
+			privilegeExistsMock:       defaultPrivilegeExistsMock(),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newUserAdminFixture(t)
-			got := f.service.RegisterNewAdmin(context.Background(), tt.setup(t, f))
-			assertEqual(t, "RegisterNewAdmin() success", tt.expected.success, got.Success)
-			assertEqual(t, "RegisterNewAdmin() error code", tt.expected.code, got.ErrorCode)
-			var count int64
-			if err := f.db.Model(&model.User{}).Count(&count).Error; err != nil {
+			f.PermissionService.CheckAdminGroupPrivilegeExistsFunc = func(ctx context.Context, in *permissionSvc.CheckAdminGroupPrivilegeExistsIn) *permissionSvc.CheckAdminGroupPrivilegeExistsOut {
+				assertEqual(t, "PermissionMockInput", in.AdminPrivilegeGroup, tt.input.PrivilegeGroup)
+				return tt.privilegeExistsMock
+			}
+			f.PermissionService.HasPrivilegeFunc = func(ctx context.Context, in *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
+				assertEqual(t, "HasPrivilegeMockInput", in.PrivilegeGroup, tt.input.AdminPrivilegeGroup)
+				assertEqual(t, "HasPrivilegeMockInput", in.Privilege, permission.PVRegisterAdminUser)
+				return tt.hasPrivilegeMock
+			}
+			f.PermissionService.ChangeAdminPrivilegeRoleFunc = func(ctx context.Context, in *permissionSvc.ChangeAdminPrivilegeRoleIn) *permissionSvc.ChangeAdminPrivilegeRoleOut {
+				assertEqual(t, "ChangeAdminPrivilegeMockInput", in.AdminPrivilegeGroup, tt.input.AdminPrivilegeGroup)
+				assertEqual(t, "ChangeAdminPrivilegeMockInput", in.NewPrivilegeGroup, tt.input.PrivilegeGroup)
+				assertEqual(t, "ChangeAdminPrivilegeMockInput", in.UserAdminId, tt.input.UserAdminId)
+
+				// Since target user id is newly created we just have to ensure that it's not zero.
+				assertNotZero(t, "ChangeAdminPrivilegeMockInput", in.TargetUserID)
+				return tt.changeAdminPermissionMock
+			}
+
+			initialUserCount := f.UserQuery.CountUsers()
+
+			startTs, err := helpers.TimeNow()
+			if err != nil {
 				t.Fatal(err)
 			}
-			if count != tt.expected.users {
-				t.Fatalf("persisted user count = %d, want %d", count, tt.expected.users)
+
+			got := f.AdminService.RegisterNewAdmin(context.Background(),
+				&userSvc.RegisterNewAdminIn{
+					Trace:               fixture.TestTrace(),
+					UserAdminId:         tt.input.UserAdminId,
+					AdminPrivilegeGroup: tt.input.AdminPrivilegeGroup,
+					Username:            tt.input.Username,
+					Email:               tt.input.Email,
+					Password:            tt.input.Password,
+					FullName:            tt.input.FullName,
+					PrivilegeGroup:      tt.input.PrivilegeGroup,
+				})
+			assertEqual(t, "RegisterNewAdmin() success", tt.expected.success, got.Success)
+			assertEqual(t, "RegisterNewAdmin() error code", tt.expected.errorCode, got.ErrorCode)
+
+			count := f.UserQuery.CountUsers()
+			if tt.expected.success == false {
+				// User not changed.
+				assertEqual(t, "UserCount", initialUserCount, count)
+				return
 			}
-			if calls := f.permissionMock.ChangeAdminPrivilegeRoleCalls(); len(calls) != tt.expected.assignCalls {
+
+			insertedUser := f.UserQuery.FindByID(got.InsertedUserId)
+			AssertNil(t, "RegisterNewAdmin check inserted user", insertedUser.DeletedAt)
+			assertNotEmpty(t, "RegisterNewAdmin check inserted user", insertedUser.ExternalID)
+			assertEqual(t, "RegisterNewAdmin check inserted user", insertedUser.Username, tt.input.Username)
+			assertEqual(t, "RegisterNewAdmin check inserted user", insertedUser.Email, tt.input.Email)
+			AssertTrue(t, "RegisterNewAdmin check inserted user", helpers.VerifyPassword(tt.input.Password, insertedUser.Password))
+			assertEqual(t, "RegisterNewAdmin check inserted user", insertedUser.FullName, tt.input.FullName)
+			assertEqual(t, "RegisterNewAdmin check inserted user", insertedUser.Role, "Admin")
+			assertTimeAfter(t, "RegisterNewAdmin check inserted user", startTs, insertedUser.Timestamp.CreatedTs)
+
+			if calls := f.PermissionService.ChangeAdminPrivilegeRoleCalls(); len(calls) != tt.expected.assignCalls {
 				t.Fatalf("ChangeAdminPrivilegeRole calls = %d, want %d", len(calls), tt.expected.assignCalls)
 			}
-			if calls := f.permissionMock.HasPrivilegeCalls(); len(calls) != tt.expected.privilegeCalls {
+			if calls := f.PermissionService.HasPrivilegeCalls(); len(calls) != tt.expected.privilegeCalls {
 				t.Fatalf("HasPrivilege calls = %d, want %d", len(calls), tt.expected.privilegeCalls)
+			}
+			if calls := f.PermissionService.CheckAdminGroupPrivilegeExistsCalls(); len(calls) != tt.expected.groupExistsCalls {
+				t.Fatalf("CheckAdminGroupPrivilegeExists calls = %d, want %d", len(calls), tt.expected.groupExistsCalls)
 			}
 		})
 	}

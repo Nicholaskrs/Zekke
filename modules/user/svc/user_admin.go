@@ -520,6 +520,41 @@ func (i *UserAdminServiceImpl) ChangeAdminPassword(ctx context.Context, paramIn 
 func (i *UserAdminServiceImpl) RegisterNewAdmin(ctx context.Context, paramIn *RegisterNewAdminIn) *RegisterNewAdminOut {
 	resp := &RegisterNewAdminOut{}
 
+	if paramIn.UserAdminId == 0 {
+		resp.ErrorCode = http.StatusBadRequest
+		return resp
+	}
+
+	if paramIn.AdminPrivilegeGroup == "" {
+		resp.ErrorCode = http.StatusBadRequest
+		return resp
+	}
+
+	if paramIn.Username == "" {
+		resp.ErrorCode = http.StatusBadRequest
+		return resp
+	}
+
+	if paramIn.Password == "" {
+		resp.ErrorCode = http.StatusBadRequest
+		return resp
+	}
+
+	if paramIn.Email == "" {
+		resp.ErrorCode = http.StatusBadRequest
+		return resp
+	}
+
+	if paramIn.FullName == "" {
+		resp.ErrorCode = http.StatusBadRequest
+		return resp
+	}
+
+	if paramIn.PrivilegeGroup == "" {
+		resp.ErrorCode = http.StatusBadRequest
+		return resp
+	}
+
 	getAdminGroupPrivilegeResp := i.PermissionAdminService.CheckAdminGroupPrivilegeExists(ctx, &permissionSvc.CheckAdminGroupPrivilegeExistsIn{
 		Trace:               paramIn.Trace,
 		AdminPrivilegeGroup: paramIn.PrivilegeGroup,
@@ -543,8 +578,8 @@ func (i *UserAdminServiceImpl) RegisterNewAdmin(ctx context.Context, paramIn *Re
 	})
 	if hasPrivilegeOut.Success == false {
 		i.Logger.Error(paramIn.Trace).Msg("RegisterNewAdmin(): check admin privilege failed")
-		resp.ErrorMessage = getAdminGroupPrivilegeResp.ErrorMessage
-		resp.ErrorCode = getAdminGroupPrivilegeResp.ErrorCode
+		resp.ErrorMessage = hasPrivilegeOut.ErrorMessage
+		resp.ErrorCode = hasPrivilegeOut.ErrorCode
 		return resp
 	}
 	if hasPrivilegeOut.IsAllowed == false {
@@ -641,6 +676,6 @@ func (i *UserAdminServiceImpl) RegisterNewAdmin(ctx context.Context, paramIn *Re
 	}
 
 	resp.Success = true
-
+	resp.InsertedUserId = newAdminId
 	return resp
 }
