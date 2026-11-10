@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"net/http"
+	"sort"
 	"testing"
 	"time"
 
@@ -25,9 +26,10 @@ func TestUserService_LoginUser(t *testing.T) {
 		tokenCount int
 	}
 	type testCase struct {
-		name     string
-		input    input
-		expected expected
+		name      string
+		input     input
+		expected  expected
+		seedToken bool
 	}
 
 	passwordHash, err := helpers.HashPassword("correct-password")
@@ -84,7 +86,8 @@ func TestUserService_LoginUser(t *testing.T) {
 				test.AssertEqual(t, "LoginUser role", user.Role, got.UserRole)
 				test.AssertNotEmpty(t, "LoginUser access token", got.Token)
 				test.AssertNotEmpty(t, "LoginUser refresh token", got.RefreshToken)
-				test.AssertEqual(t, "stored refresh token hash", helpers.HashToken(got.RefreshToken), tokens[0].TokenHash)
+				storedToken := f.UserQuery.FindRefreshTokenByHash(helpers.HashToken(got.RefreshToken))
+				test.AssertEqual(t, "stored refresh token user ID", user.ID, storedToken.UserID)
 			}
 		})
 	}
@@ -368,9 +371,14 @@ func TestUserService_DeleteFcmTokenBulk(t *testing.T) {
 			test.AssertEqual(t, "DeleteFcmTokenBulk error code", tt.expected.errorCode, got.ErrorCode)
 			tokens := f.UserQuery.FindFcmTokens(user.ID)
 			test.AssertEqual(t, "remaining FCM token count", len(tt.expected.remainingTokens), len(tokens))
-			for i, token := range tt.expected.remainingTokens {
-				test.AssertEqual(t, "remaining FCM token", token, tokens[i].FcmToken)
+			actualTokens := make([]string, len(tokens))
+			for i, token := range tokens {
+				actualTokens[i] = token.FcmToken
 			}
+			sort.Strings(actualTokens)
+			expectedTokens := append([]string(nil), tt.expected.remainingTokens...)
+			sort.Strings(expectedTokens)
+			test.AssertEqual(t, "remaining FCM tokens", expectedTokens, actualTokens)
 		})
 	}
 }
@@ -387,15 +395,17 @@ func TestUserService_GetUserFcmToken(t *testing.T) {
 		tokenRows int
 	}
 	type testCase struct {
-		name     string
-		input    input
-		expected expected
+		name      string
+		input     input
+		expected  expected
+		seedToken bool
 	}
 
 	tests := []testCase{
 		{
-			name:     "returns user tokens",
-			expected: expected{success: true, tokenRows: 1},
+			name:      "returns user tokens",
+			expected:  expected{success: true, tokenRows: 1},
+			seedToken: true,
 		},
 		{
 			name:     "returns empty token list",
@@ -408,11 +418,11 @@ func TestUserService_GetUserFcmToken(t *testing.T) {
 		},
 	}
 
-	for i, tt := range tests {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := fixture.NewUserFixture(t)
 			user := f.SeedUser(t, fixture.UserRow{})
-			if i == 0 {
+			if tt.seedToken {
 				f.SeedFcmToken(t, fixture.FcmTokenRow{UserID: user.ID, Token: "device-token"})
 			}
 			userID := tt.input.UserID
@@ -528,8 +538,8 @@ func TestUserService_Refresh(t *testing.T) {
 			if tt.expected.success {
 				test.AssertNotEmpty(t, "Refresh access token", got.AccessToken)
 				test.AssertNotEmpty(t, "Refresh new token", got.RefreshToken)
-				test.AssertEqual(t, "Refresh new token hash", helpers.HashToken(got.RefreshToken), tokens[1].TokenHash)
-				test.AssertTrue(t, "Refresh old token used at", tokens[0].UsedAt != nil)
+				test.AssertEqual(t, "Refresh new token hash", helpers.HashToken(got.RefreshToken), f.UserQuery.FindRefreshTokenByHash(helpers.HashToken(got.RefreshToken)).TokenHash)
+				test.AssertTrue(t, "Refresh old token used at", f.UserQuery.FindRefreshTokenByHash(helpers.HashToken(tt.input.RefreshToken)).UsedAt != nil)
 			}
 			if tt.expected.revoked {
 				test.AssertTrue(t, "Refresh reused token revoked at", tokens[0].RevokedAt != nil)

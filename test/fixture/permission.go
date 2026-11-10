@@ -51,11 +51,25 @@ func (p *PermissionFixture) SeedUserPrivilegeGroup(t *testing.T, userID uint, gr
 func (p *PermissionFixture) FindUserPrivilegeGroup(userID uint) *model.UserPrivilegeGroup {
 	p.t.Helper()
 	var group model.UserPrivilegeGroup
-	if err := p.db.Where("user_id = ?", userID).First(&group).Error; err != nil {
-		p.t.Fatal(err)
+	result := p.db.Where("user_id = ?", userID).Find(&group)
+	if result.Error != nil {
+		p.t.Fatal(result.Error)
+		return nil
+	}
+	if result.RowsAffected == 0 {
 		return nil
 	}
 	return &group
+}
+
+func (p *PermissionFixture) FindGroupPrivileges(group string) []*model.PrivilegeGroupPrivilege {
+	p.t.Helper()
+	var privileges []*model.PrivilegeGroupPrivilege
+	if err := p.db.Where("privilege_group_code = ?", group).Find(&privileges).Error; err != nil {
+		p.t.Fatal(err)
+		return nil
+	}
+	return privileges
 }
 
 func (p *PermissionFixture) CountPrivilegeGroups() int64 {

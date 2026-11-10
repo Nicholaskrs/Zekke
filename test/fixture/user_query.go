@@ -64,6 +64,15 @@ func (q *UserQuery) FindRefreshTokens(userID uint) []*model.RefreshToken {
 	return tokens
 }
 
+func (q *UserQuery) FindRefreshTokenByHash(tokenHash string) *model.RefreshToken {
+	var token model.RefreshToken
+	if err := q.db.Where("token_hash = ?", tokenHash).First(&token).Error; err != nil {
+		q.t.Fatal(err)
+		return nil
+	}
+	return &token
+}
+
 func (q *UserQuery) CountUsers() int64 {
 	var count int64
 	if err := q.db.Model(&model.User{}).Count(&count).Error; err != nil {

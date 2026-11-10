@@ -51,7 +51,13 @@ func TestUserAdminService_LoginUserAdmin(t *testing.T) {
 		{
 			name:               "rejects incorrect password",
 			input:              input{Username: "admin", Password: "wrong-password"},
-			expected:           expected{errorCode: http.StatusUnauthorized},
+			expected:           expected{success: false, errorCode: http.StatusUnauthorized},
+			privilegeGroupMock: defaultPrivilegeGroupMock(),
+		},
+		{
+			name:               "rejects unknown username",
+			input:              input{Username: "missing", Password: "correct-password"},
+			expected:           expected{success: false, errorCode: http.StatusUnauthorized},
 			privilegeGroupMock: defaultPrivilegeGroupMock(),
 		},
 		{
@@ -222,6 +228,15 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 				out.IsAllowed = false
 			}),
 		},
+		{
+			name:     "returns privilege dependency failure",
+			input:    input{AdminUserId: 10, AdminPrivilegeGroup: "SuperAdmin"},
+			expected: expected{success: false, errorCode: http.StatusInternalServerError, privilegeCalls: 1},
+			hasPrivilegeMock: fixture.Modify(defaultHasPrivilegeMock, func(out *permissionSvc.HasPrivilegeOut) {
+				out.Success = false
+				out.ErrorCode = http.StatusInternalServerError
+			}),
+		},
 	}
 
 	for _, tt := range tests {
@@ -249,7 +264,9 @@ func TestUserAdminService_DeleteUser(t *testing.T) {
 			actual := f.UserQuery.FindByID(user.ID)
 			test.AssertEqual(t, "DeleteUser deleted state", tt.expected.deleted, actual.DeletedAt != nil)
 			tokens := f.UserQuery.FindRefreshTokens(user.ID)
-			test.AssertEqual(t, "DeleteUser token revoked", tt.expected.revoked, tokens[0].RevokedAt != nil)
+			test.AssertEqual(t, "DeleteUser token revoked", tt.expected.revoked,
+				f.UserQuery.FindRefreshTokenByHash(helpers.HashToken("target-token")).RevokedAt != nil)
+			test.AssertEqual(t, "DeleteUser refresh token count", 1, len(tokens))
 		})
 	}
 }
@@ -338,11 +355,14 @@ func TestUserAdminService_Refresh(t *testing.T) {
 			if tt.expected.success {
 				test.AssertNotEmpty(t, "Admin Refresh access token", got.AccessToken)
 				test.AssertNotEmpty(t, "Admin Refresh token", got.RefreshToken)
-				test.AssertEqual(t, "Admin Refresh new token hash", helpers.HashToken(got.RefreshToken), tokens[1].TokenHash)
-				test.AssertTrue(t, "Admin Refresh old token used", tokens[0].UsedAt != nil)
+				test.AssertEqual(t, "Admin Refresh new token hash", helpers.HashToken(got.RefreshToken),
+					f.UserQuery.FindRefreshTokenByHash(helpers.HashToken(got.RefreshToken)).TokenHash)
+				test.AssertTrue(t, "Admin Refresh old token used",
+					f.UserQuery.FindRefreshTokenByHash(helpers.HashToken(tt.input.RefreshToken)).UsedAt != nil)
 			}
 			if tt.expected.revoked {
-				test.AssertTrue(t, "Admin Refresh token revoked", tokens[0].RevokedAt != nil)
+				test.AssertTrue(t, "Admin Refresh token revoked",
+					f.UserQuery.FindRefreshTokenByHash(helpers.HashToken(tt.input.RefreshToken)).RevokedAt != nil)
 			}
 		})
 	}
@@ -396,6 +416,24 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 			privilegeGroupMock: defaultPrivilegeGroupMock(),
 		},
 		{
+			name:               "rejects empty new password",
+			input:              input{OldPassword: "old-password"},
+			expected:           expected{success: false, errorCode: http.StatusBadRequest, tokenRows: 1},
+			privilegeGroupMock: defaultPrivilegeGroupMock(),
+		},
+		{
+			name:               "rejects empty old password",
+			input:              input{NewPassword: "new-password"},
+			expected:           expected{success: false, errorCode: http.StatusBadRequest, tokenRows: 1},
+			privilegeGroupMock: defaultPrivilegeGroupMock(),
+		},
+		{
+			name:               "rejects unknown admin ID",
+			input:              input{UserAdminId: 99999, OldPassword: "old-password", NewPassword: "new-password"},
+			expected:           expected{success: false, errorCode: http.StatusUnauthorized, tokenRows: 1},
+			privilegeGroupMock: defaultPrivilegeGroupMock(),
+		},
+		{
 			name:     "returns privilege dependency failure without partial update",
 			input:    input{OldPassword: "old-password", NewPassword: "new-password"},
 			expected: expected{errorCode: http.StatusInternalServerError, privilegeCalls: 1, tokenRows: 1},
@@ -416,7 +454,7 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 			admin := f.SeedUser(t, fixture.UserRow{Username: "admin", Role: "Admin", PasswordHash: passwordHash})
 			f.SeedRefreshToken(t, fixture.RefreshTokenRow{UserID: admin.ID, Token: "old-token"})
 			adminID := tt.input.UserAdminId
-			if tt.name != "rejects empty admin ID" {
+			if adminID == 0 && tt.name != "rejects empty admin ID" {
 				adminID = int(admin.ID)
 			}
 			f.PermissionService.GetAdminGroupPrivilegeFunc = func(ctx context.Context, in *permissionSvc.GetAdminGroupPrivilegeIn) *permissionSvc.GetAdminGroupPrivilegeOut {
@@ -435,10 +473,12 @@ func TestUserAdminService_ChangeAdminPassword(t *testing.T) {
 			test.AssertEqual(t, "ChangeAdminPassword password changed", tt.expected.success, helpers.VerifyPassword("new-password", actual.Password))
 			tokens := f.UserQuery.FindRefreshTokens(admin.ID)
 			test.AssertEqual(t, "ChangeAdminPassword token rows", tt.expected.tokenRows, len(tokens))
-			test.AssertEqual(t, "ChangeAdminPassword revoked", tt.expected.revoked, tokens[0].RevokedAt != nil)
+			test.AssertEqual(t, "ChangeAdminPassword revoked", tt.expected.revoked,
+				f.UserQuery.FindRefreshTokenByHash(helpers.HashToken("old-token")).RevokedAt != nil)
 			if tt.expected.success {
 				test.AssertNotEmpty(t, "ChangeAdminPassword returned refresh token", got.RefreshToken)
-				test.AssertEqual(t, "ChangeAdminPassword returned token hash", helpers.HashToken(got.RefreshToken), tokens[1].TokenHash)
+				test.AssertEqual(t, "ChangeAdminPassword returned token hash", helpers.HashToken(got.RefreshToken),
+					f.UserQuery.FindRefreshTokenByHash(helpers.HashToken(got.RefreshToken)).TokenHash)
 			}
 		})
 	}
