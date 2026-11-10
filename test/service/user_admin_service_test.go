@@ -8,6 +8,7 @@ import (
 	permissionSvc "template-go/modules/permission/svc"
 	"template-go/modules/user/permission"
 	userSvc "template-go/modules/user/svc"
+	testassert "template-go/test"
 	"template-go/test/fixture"
 	"testing"
 )
@@ -46,11 +47,6 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 	// +----------+
 	// | taken    |
 	// +----------+
-	f := fixture.NewUserFixture(t)
-	f.SeedUsers(t, []fixture.UserRow{
-		{Username: "taken"},
-	})
-
 	// Default value for mock value.
 	defaultPrivilegeExistsMock := func() *permissionSvc.CheckAdminGroupPrivilegeExistsOut {
 		return &permissionSvc.CheckAdminGroupPrivilegeExistsOut{
@@ -106,7 +102,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
 		},
 		{
-			name: "UserAdminId Empty",
+			name: "rejects empty admin user ID",
 			input: input{
 				UserAdminId:         0,
 				AdminPrivilegeGroup: "SuperAdmin",
@@ -128,7 +124,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
 		},
 		{
-			name: "AdminPrivilegeGroup Empty",
+			name: "rejects empty admin privilege group",
 			input: input{
 				UserAdminId:         10,
 				AdminPrivilegeGroup: "",
@@ -150,7 +146,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
 		},
 		{
-			name: "AdminPrivilegeGroup Username Empty",
+			name: "rejects empty username",
 			input: input{
 				UserAdminId:         10,
 				AdminPrivilegeGroup: "SuperAdmin",
@@ -172,7 +168,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
 		},
 		{
-			name: "AdminPrivilegeGroup Email Empty",
+			name: "rejects empty email",
 			input: input{
 				UserAdminId:         10,
 				AdminPrivilegeGroup: "SuperAdmin",
@@ -194,7 +190,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
 		},
 		{
-			name: "AdminPrivilegeGroup Password Empty",
+			name: "rejects empty password",
 			input: input{
 				UserAdminId:         10,
 				AdminPrivilegeGroup: "SuperAdmin",
@@ -216,7 +212,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
 		},
 		{
-			name: "AdminPrivilegeGroup Fullname Empty",
+			name: "rejects empty full name",
 			input: input{
 				UserAdminId:         10,
 				AdminPrivilegeGroup: "SuperAdmin",
@@ -238,7 +234,7 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
 		},
 		{
-			name: "AdminPrivilegeGroup PrivilegeGroup Empty",
+			name: "rejects empty privilege group",
 			input: input{
 				UserAdminId:         10,
 				AdminPrivilegeGroup: "SuperAdmin",
@@ -271,10 +267,10 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 				PrivilegeGroup:      "Auditor",
 			},
 			expected: expected{
-				success:        false,
-				errorCode:      http.StatusBadRequest,
-				assignCalls:    0,
-				privilegeCalls: 1,
+				success:          false,
+				errorCode:        http.StatusBadRequest,
+				assignCalls:      0,
+				groupExistsCalls: 1,
 			},
 			privilegeExistsMock: fixture.Modify(defaultPrivilegeExistsMock, func(out *permissionSvc.CheckAdminGroupPrivilegeExistsOut) {
 				out.IsExists = false
@@ -294,10 +290,10 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 				PrivilegeGroup:      "Auditor",
 			},
 			expected: expected{
-				success:        false,
-				errorCode:      http.StatusInternalServerError,
-				assignCalls:    0,
-				privilegeCalls: 1,
+				success:          false,
+				errorCode:        http.StatusInternalServerError,
+				assignCalls:      0,
+				groupExistsCalls: 1,
 			},
 			privilegeExistsMock: fixture.Modify(defaultPrivilegeExistsMock, func(out *permissionSvc.CheckAdminGroupPrivilegeExistsOut) {
 				out.Success = false
@@ -318,8 +314,10 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 				PrivilegeGroup:      "Auditor",
 			},
 			expected: expected{
-				errorCode:      http.StatusForbidden,
-				privilegeCalls: 1,
+				success:          false,
+				errorCode:        http.StatusForbidden,
+				privilegeCalls:   1,
+				groupExistsCalls: 1,
 			},
 			privilegeExistsMock: defaultPrivilegeExistsMock(),
 			hasPrivilegeMock: fixture.Modify(defaultHasPrivilegeMock, func(out *permissionSvc.HasPrivilegeOut) {
@@ -339,8 +337,10 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 				PrivilegeGroup:      "Auditor",
 			},
 			expected: expected{
-				errorCode:      http.StatusInternalServerError,
-				privilegeCalls: 1,
+				success:          false,
+				errorCode:        http.StatusInternalServerError,
+				privilegeCalls:   1,
+				groupExistsCalls: 1,
 			},
 			privilegeExistsMock: defaultPrivilegeExistsMock(),
 			hasPrivilegeMock: fixture.Modify(defaultHasPrivilegeMock, func(out *permissionSvc.HasPrivilegeOut) {
@@ -386,8 +386,33 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 				PrivilegeGroup:      "Auditor",
 			},
 			expected: expected{
-				errorCode:      http.StatusBadRequest,
-				privilegeCalls: 1,
+				success:          false,
+				errorCode:        http.StatusBadRequest,
+				assignCalls:      0,
+				privilegeCalls:   1,
+				groupExistsCalls: 1,
+			},
+			privilegeExistsMock:       defaultPrivilegeExistsMock(),
+			hasPrivilegeMock:          defaultHasPrivilegeMock(),
+			changeAdminPermissionMock: defaultChangeAdminPermissionMock(),
+		},
+		{
+			name: "rejects duplicate email",
+			input: input{
+				UserAdminId:         10,
+				AdminPrivilegeGroup: "SuperAdmin",
+				Username:            "new-admin2",
+				Email:               "taken@example.test",
+				Password:            "helloWorld2",
+				FullName:            "John Smith2",
+				PrivilegeGroup:      "Auditor",
+			},
+			expected: expected{
+				success:          false,
+				errorCode:        http.StatusBadRequest,
+				assignCalls:      0,
+				privilegeCalls:   1,
+				groupExistsCalls: 1,
 			},
 			privilegeExistsMock:       defaultPrivilegeExistsMock(),
 			hasPrivilegeMock:          defaultHasPrivilegeMock(),
@@ -397,22 +422,27 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			f := fixture.NewUserFixture(t)
+			f.SeedUsers(t, []fixture.UserRow{
+				{Username: "taken", Email: "taken@example.test"},
+			})
+
 			f.PermissionService.CheckAdminGroupPrivilegeExistsFunc = func(ctx context.Context, in *permissionSvc.CheckAdminGroupPrivilegeExistsIn) *permissionSvc.CheckAdminGroupPrivilegeExistsOut {
-				assertEqual(t, "PermissionMockInput", in.AdminPrivilegeGroup, tt.input.PrivilegeGroup)
+				testassert.AssertEqual(t, "CheckAdminGroupPrivilegeExists.AdminPrivilegeGroup", tt.input.PrivilegeGroup, in.AdminPrivilegeGroup)
 				return tt.privilegeExistsMock
 			}
 			f.PermissionService.HasPrivilegeFunc = func(ctx context.Context, in *permissionSvc.HasPrivilegeIn) *permissionSvc.HasPrivilegeOut {
-				assertEqual(t, "HasPrivilegeMockInput", in.PrivilegeGroup, tt.input.AdminPrivilegeGroup)
-				assertEqual(t, "HasPrivilegeMockInput", in.Privilege, permission.PVRegisterAdminUser)
+				testassert.AssertEqual(t, "HasPrivilege.PrivilegeGroup", tt.input.AdminPrivilegeGroup, in.PrivilegeGroup)
+				testassert.AssertEqual(t, "HasPrivilege.Privilege", permission.PVRegisterAdminUser, in.Privilege)
 				return tt.hasPrivilegeMock
 			}
 			f.PermissionService.ChangeAdminPrivilegeRoleFunc = func(ctx context.Context, in *permissionSvc.ChangeAdminPrivilegeRoleIn) *permissionSvc.ChangeAdminPrivilegeRoleOut {
-				assertEqual(t, "ChangeAdminPrivilegeMockInput", in.AdminPrivilegeGroup, tt.input.AdminPrivilegeGroup)
-				assertEqual(t, "ChangeAdminPrivilegeMockInput", in.NewPrivilegeGroup, tt.input.PrivilegeGroup)
-				assertEqual(t, "ChangeAdminPrivilegeMockInput", in.UserAdminId, tt.input.UserAdminId)
+				testassert.AssertEqual(t, "ChangeAdminPrivilegeRole.AdminPrivilegeGroup", tt.input.AdminPrivilegeGroup, in.AdminPrivilegeGroup)
+				testassert.AssertEqual(t, "ChangeAdminPrivilegeRole.NewPrivilegeGroup", tt.input.PrivilegeGroup, in.NewPrivilegeGroup)
+				testassert.AssertEqual(t, "ChangeAdminPrivilegeRole.UserAdminId", tt.input.UserAdminId, in.UserAdminId)
 
 				// Since target user id is newly created we just have to ensure that it's not zero.
-				assertNotZero(t, "ChangeAdminPrivilegeMockInput", in.TargetUserID)
+				testassert.AssertNotZero(t, "ChangeAdminPrivilegeRole.TargetUserID", in.TargetUserID)
 				return tt.changeAdminPermissionMock
 			}
 
@@ -434,25 +464,8 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 					FullName:            tt.input.FullName,
 					PrivilegeGroup:      tt.input.PrivilegeGroup,
 				})
-			assertEqual(t, "RegisterNewAdmin() success", tt.expected.success, got.Success)
-			assertEqual(t, "RegisterNewAdmin() error code", tt.expected.errorCode, got.ErrorCode)
-
-			count := f.UserQuery.CountUsers()
-			if tt.expected.success == false {
-				// User not changed.
-				assertEqual(t, "UserCount", initialUserCount, count)
-				return
-			}
-
-			insertedUser := f.UserQuery.FindByID(got.InsertedUserId)
-			AssertNil(t, "RegisterNewAdmin check inserted user", insertedUser.DeletedAt)
-			assertNotEmpty(t, "RegisterNewAdmin check inserted user", insertedUser.ExternalID)
-			assertEqual(t, "RegisterNewAdmin check inserted user", insertedUser.Username, tt.input.Username)
-			assertEqual(t, "RegisterNewAdmin check inserted user", insertedUser.Email, tt.input.Email)
-			AssertTrue(t, "RegisterNewAdmin check inserted user", helpers.VerifyPassword(tt.input.Password, insertedUser.Password))
-			assertEqual(t, "RegisterNewAdmin check inserted user", insertedUser.FullName, tt.input.FullName)
-			assertEqual(t, "RegisterNewAdmin check inserted user", insertedUser.Role, "Admin")
-			assertTimeAfter(t, "RegisterNewAdmin check inserted user", startTs, insertedUser.Timestamp.CreatedTs)
+			testassert.AssertEqual(t, "RegisterNewAdmin() success", tt.expected.success, got.Success)
+			testassert.AssertEqual(t, "RegisterNewAdmin() error code", tt.expected.errorCode, got.ErrorCode)
 
 			if calls := f.PermissionService.ChangeAdminPrivilegeRoleCalls(); len(calls) != tt.expected.assignCalls {
 				t.Fatalf("ChangeAdminPrivilegeRole calls = %d, want %d", len(calls), tt.expected.assignCalls)
@@ -463,6 +476,25 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 			if calls := f.PermissionService.CheckAdminGroupPrivilegeExistsCalls(); len(calls) != tt.expected.groupExistsCalls {
 				t.Fatalf("CheckAdminGroupPrivilegeExists calls = %d, want %d", len(calls), tt.expected.groupExistsCalls)
 			}
+
+			count := f.UserQuery.CountUsers()
+			if tt.expected.success == false {
+				// User not changed.
+				testassert.AssertEqual(t, "UserCount", initialUserCount, count)
+				return
+			}
+
+			insertedUser := f.UserQuery.FindByID(got.InsertedUserId)
+			testassert.AssertNil(t, "RegisterNewAdmin inserted user DeletedAt", insertedUser.DeletedAt)
+			testassert.AssertNotEmpty(t, "RegisterNewAdmin inserted user ExternalID", insertedUser.ExternalID)
+			testassert.AssertEqual(t, "RegisterNewAdmin inserted user Username", tt.input.Username, insertedUser.Username)
+			testassert.AssertEqual(t, "RegisterNewAdmin inserted user Email", tt.input.Email, insertedUser.Email)
+			testassert.AssertTrue(t, "RegisterNewAdmin check inserted user", helpers.VerifyPassword(tt.input.Password, insertedUser.Password))
+			testassert.AssertEqual(t, "RegisterNewAdmin inserted user FullName", tt.input.FullName, insertedUser.FullName)
+			testassert.AssertEqual(t, "RegisterNewAdmin inserted user Role", "Admin", insertedUser.Role)
+			testassert.AssertTimeAfter(t, "RegisterNewAdmin inserted user CreatedTs", startTs, insertedUser.Timestamp.CreatedTs)
+			testassert.AssertTimeAfter(t, "RegisterNewAdmin inserted user LastUpdatedTs", startTs, insertedUser.Timestamp.LastUpdatedTs)
+			testassert.AssertEqual(t, "UserCount", initialUserCount+1, count)
 		})
 	}
 }
