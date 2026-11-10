@@ -1,4 +1,4 @@
-package service_test
+package fixture
 
 import (
 	"database/sql"
@@ -18,8 +18,20 @@ import (
 	"template-go/util/config"
 )
 
-func newTestDatabase(t *testing.T) (*gorm.DB, config.Config) {
+// Set by RunMain once the test container is up.
+var (
+	postgresHost string
+	postgresPort string
+)
+
+// NewTestDatabase creates an isolated, migrated database for one test and
+// drops it again when the test finishes.
+func NewTestDatabase(t *testing.T) (*gorm.DB, config.Config) {
 	t.Helper()
+
+	if postgresHost == "" || postgresPort == "" {
+		t.Fatal("test PostgreSQL address not set: use fixture.RunMain in TestMain")
+	}
 
 	timezone := os.Getenv("DB_TIMEZONE")
 	if timezone == "" {
@@ -35,6 +47,8 @@ func newTestDatabase(t *testing.T) (*gorm.DB, config.Config) {
 		DbMaxOpenConns: 2,
 		DbMaxIdleConns: 1,
 	}
+
+	// 1. Create an empty database with a unique name.
 	adminDB, err := gorm.Open(postgres.Open(postgresDSN(cfg, "postgres")), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("connect to test PostgreSQL instance: %v", err)
@@ -49,6 +63,8 @@ func newTestDatabase(t *testing.T) (*gorm.DB, config.Config) {
 		_ = adminSQLDB.Close()
 		t.Fatalf("create isolated test database: %v", err)
 	}
+
+	// 2. Register cleanup: close our connection, then drop the database.
 	var testSQLDB *sql.DB
 	t.Cleanup(func() {
 		if testSQLDB != nil {
@@ -56,26 +72,14 @@ func newTestDatabase(t *testing.T) (*gorm.DB, config.Config) {
 				t.Errorf("close isolated test database connection: %v", err)
 			}
 		}
-
-		cleanupDB, err := gorm.Open(postgres.Open(postgresDSN(cfg, "postgres")), &gorm.Config{})
-		if err != nil {
-			t.Errorf("reconnect to test PostgreSQL instance for cleanup: %v", err)
-			return
-		}
-		cleanupSQLDB, err := cleanupDB.DB()
-		if err != nil {
-			t.Errorf("get test PostgreSQL cleanup connection: %v", err)
-			return
-		}
-		defer cleanupSQLDB.Close()
-		if err := cleanupDB.Exec(fmt.Sprintf(`DROP DATABASE IF EXISTS "%s"`, cfg.DbName)).Error; err != nil {
-			t.Errorf("drop isolated test database: %v", err)
-		}
+		dropDatabase(t, cfg)
 	})
+
 	if err := adminSQLDB.Close(); err != nil {
 		t.Fatalf("close test database administration connection: %v", err)
 	}
 
+	// 3. Connect to the new database and apply the production migrations.
 	db := appDatabase.NewEngine(&cfg).SetupModels(logger.NewZerologLogger("service-test"), &cfg)
 	testSQLDB, err = db.DB()
 	if err != nil {
@@ -86,6 +90,27 @@ func newTestDatabase(t *testing.T) (*gorm.DB, config.Config) {
 		t.Fatalf("apply production migrations to isolated test database: %v", err)
 	}
 	return db, cfg
+}
+
+// dropDatabase reconnects to the admin database and drops cfg.DbName.
+func dropDatabase(t *testing.T, cfg config.Config) {
+	t.Helper()
+
+	cleanupDB, err := gorm.Open(postgres.Open(postgresDSN(cfg, "postgres")), &gorm.Config{})
+	if err != nil {
+		t.Errorf("reconnect to test PostgreSQL instance for cleanup: %v", err)
+		return
+	}
+	cleanupSQLDB, err := cleanupDB.DB()
+	if err != nil {
+		t.Errorf("get test PostgreSQL cleanup connection: %v", err)
+		return
+	}
+	defer cleanupSQLDB.Close()
+
+	if err := cleanupDB.Exec(fmt.Sprintf(`DROP DATABASE IF EXISTS "%s"`, cfg.DbName)).Error; err != nil {
+		t.Errorf("drop isolated test database: %v", err)
+	}
 }
 
 func postgresDSN(cfg config.Config, database string) string {
