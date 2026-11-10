@@ -86,6 +86,44 @@ func (u *UserFixture) SeedUsers(t *testing.T, rows []UserRow) []*model.User {
 	return users
 }
 
+func (u *UserFixture) SeedRole(t *testing.T, code string) *model.Role {
+	t.Helper()
+	role := &model.Role{Code: code}
+	mustCreate(t, u.db, role, "role")
+	return role
+}
+
+func (u *UserFixture) SeedUserPrivilegeGroup(t *testing.T, userID uint, group string) *model.UserPrivilegeGroup {
+	t.Helper()
+	userPrivilegeGroup := &model.UserPrivilegeGroup{UserID: userID, PrivilegeGroupCode: group}
+	mustCreate(t, u.db, userPrivilegeGroup, "user privilege group")
+	return userPrivilegeGroup
+}
+
+type FcmTokenRow struct {
+	UserID uint
+	Token  string
+}
+
+func (u *UserFixture) SeedFcmToken(t *testing.T, row FcmTokenRow) *model.FcmToken {
+	t.Helper()
+	now, err := helpers.TimeNow()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	token := &model.FcmToken{
+		UserID:   row.UserID,
+		FcmToken: orDefault(row.Token, uuid.NewString()),
+		Timestamp: &model.Timestamp{
+			CreatedTs:     now,
+			LastUpdatedTs: now,
+		},
+	}
+	mustCreate(t, u.db, token, "FCM token")
+	return token
+}
+
 // =====================================================================
 // Refresh tokens
 // =====================================================================

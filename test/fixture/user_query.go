@@ -37,6 +37,33 @@ func (q *UserQuery) FindByID(id uint) *model.User {
 	return &user
 }
 
+func (q *UserQuery) FindByUsername(username string) *model.User {
+	var user model.User
+	if err := q.db.Where("username = ?", username).First(&user).Error; err != nil {
+		q.t.Fatal(err)
+		return nil
+	}
+	return &user
+}
+
+func (q *UserQuery) FindFcmTokens(userID uint) []*model.FcmToken {
+	var tokens []*model.FcmToken
+	if err := q.db.Where("user_id = ?", userID).Find(&tokens).Error; err != nil {
+		q.t.Fatal(err)
+		return nil
+	}
+	return tokens
+}
+
+func (q *UserQuery) FindRefreshTokens(userID uint) []*model.RefreshToken {
+	var tokens []*model.RefreshToken
+	if err := q.db.Where("user_id = ?", userID).Find(&tokens).Error; err != nil {
+		q.t.Fatal(err)
+		return nil
+	}
+	return tokens
+}
+
 func (q *UserQuery) CountUsers() int64 {
 	var count int64
 	if err := q.db.Model(&model.User{}).Count(&count).Error; err != nil {
