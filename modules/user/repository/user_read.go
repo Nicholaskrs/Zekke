@@ -34,7 +34,7 @@ func (r *UserRepositoryRead) CheckUsernameExists(username string) (bool, error) 
 	var count int64
 	if err := r.transaction.
 		Model(&model.User{}).
-		Where("username = ?", username).
+		Where("username = LOWER(?)", username).
 		Where("deleted_at IS NULL").
 		Count(&count).Error; err != nil {
 		return false, helpers.Wrap(err)
@@ -47,7 +47,7 @@ func (r *UserRepositoryRead) CheckEmailExists(email string) (bool, error) {
 	var count int64
 	if err := r.transaction.
 		Model(&model.User{}).
-		Where("email = ?", email).
+		Where("email = LOWER(?)", email).
 		Where("deleted_at IS NULL").
 		Count(&count).Error; err != nil {
 		return false, helpers.Wrap(err)

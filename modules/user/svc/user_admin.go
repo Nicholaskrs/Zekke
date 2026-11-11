@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	dto "template-go/base/base"
 	"template-go/base/constants"
 	"template-go/base/helpers"
@@ -520,6 +521,13 @@ func (i *UserAdminServiceImpl) ChangeAdminPassword(ctx context.Context, paramIn 
 func (i *UserAdminServiceImpl) RegisterNewAdmin(ctx context.Context, paramIn *RegisterNewAdminIn) *RegisterNewAdminOut {
 	resp := &RegisterNewAdminOut{}
 
+	paramIn.Email = strings.TrimSpace(paramIn.Email)
+	paramIn.Password = strings.TrimSpace(paramIn.Password)
+	paramIn.Username = strings.TrimSpace(paramIn.Username)
+	paramIn.PrivilegeGroup = strings.TrimSpace(paramIn.PrivilegeGroup)
+	paramIn.FullName = strings.TrimSpace(paramIn.FullName)
+	paramIn.AdminPrivilegeGroup = strings.TrimSpace(paramIn.AdminPrivilegeGroup)
+
 	if paramIn.UserAdminId == 0 {
 		resp.ErrorCode = http.StatusBadRequest
 		return resp
@@ -636,8 +644,8 @@ func (i *UserAdminServiceImpl) RegisterNewAdmin(ctx context.Context, paramIn *Re
 	newAdminId, err := repo.CreateUser(&model.User{
 		ID:         0,
 		ExternalID: uuid.New().String(),
-		Username:   paramIn.Username,
-		Email:      paramIn.Email,
+		Username:   strings.ToLower(paramIn.Username),
+		Email:      strings.ToLower(paramIn.Email),
 		Password:   passwordHash,
 		FullName:   paramIn.FullName,
 		Role:       "Admin",
