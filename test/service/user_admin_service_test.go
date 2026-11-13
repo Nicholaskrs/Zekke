@@ -43,13 +43,14 @@ func TestUserAdminService_RegisterNewAdmin(t *testing.T) {
 	// stay sequential (no t.Parallel inside t.Run). Mock call counts are local per subtest.
 	f := fixture.NewUserFixture(t)
 
-	// +----------+
-	// | Username |
-	// +----------+
-	// | taken    |
-	// +----------+
+	// +------------+-----------------+
+	// | Username   | Email           |
+	// +------------+------------------
+	// | taken      | taken@yahoo.com |
+	// | other-user | taken@gmail.com |
+	// +----------+-------------------+
 	f.SeedUsers(t, []fixture.UserRow{
-		{Username: "taken"},
+		{Username: "taken", Email: "taken@yahoo.com"},
 		{Username: "other-user", Email: "taken@gmail.com"},
 	})
 
